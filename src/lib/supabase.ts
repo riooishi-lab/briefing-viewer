@@ -1,13 +1,18 @@
 import { createClient } from '@supabase/supabase-js'
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || ''
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || ''
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error('Supabase環境変数が設定されていません。.env.example を参照してください。')
+export const isConfigured = Boolean(supabaseUrl && supabaseAnonKey)
+
+if (!isConfigured) {
+  console.error('Supabase環境変数が設定されていません。VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY を確認してください。')
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+export const supabase = createClient(
+  supabaseUrl || 'https://placeholder.supabase.co',
+  supabaseAnonKey || 'placeholder'
+)
 
 // ─── 型定義 ───
 
