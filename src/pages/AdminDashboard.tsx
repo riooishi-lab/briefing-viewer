@@ -1,0 +1,527 @@
+import { useEffect, useState, useCallback } from 'react'
+import { useAuth } from '../contexts/AuthContext'
+import { supabase } from '../lib/supabase'
+import type { BriefingVideo, Student, SurveyQuestion, SurveyResponse, WatchEvent } from '../lib/supabase'
+import { toast } from 'sonner'
+import {
+  Video, Users, BarChart3, ClipboardList, LogOut, Plus, Trash2,
+  Copy, Link, Eye, Clock, CheckCircle2, XCircle, Loader2, Play
+} from 'lucide-react'
+
+type Tab = 'videos' | 'students' | 'surveys' | 'logs'
+
+// YouTube ID 抽出
+const extractYouTubeId = (url: string): string | null => {
+  const m = url.match(/(?:youtube\.com\/(?:[^/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?/\s]{11})/i)
+  return m ? m[1] : null
+}
+
+// ─── 動画管理 ───
+function VideosTab({ companyId }: { companyId: string }) {
+  const [videos, setVideos] = useState<BriefingVideo[]>([])
+  const [loading, setLoading] = useState(true)
+  const [title, setTitle] = useState('')
+  const [url, setUrl] = useState('')
+  const [desc, setDesc] = useState('')
+
+  const fetch = useCallback(async () => {
+    const { data } = await supabase.from('briefing_videos').select('*').eq('company_id', companyId).order('created_at', { ascending: false })
+    setVideos(data || [])
+    setLoading(false)
+  }, [companyId])
+
+  useEffect(() => { fetch() }, [fetch])
+
+  const addVideo = async () => {
+    if (!title || !url) return
+    if (!extractYouTubeId(url)) { toast.error('有効なYouTube URLを入力してください'); return }
+    const { error } = await supabase.from('briefing_videos').insert({ title, youtube_url: url, description: desc || null, company_id: companyId })
+    if (error) { toast.error('追加に失敗しました'); return }
+    setTitle(''); setUrl(''); setDesc('')
+    toast.success('動画を追加しました')
+    fetch()
+  }
+
+  const togglePublish = async (id: string, current: boolean) => {
+    await supabase.from('briefing_videos').update({ is_published: !current }).eq('id', id)
+    fetch()
+  }
+
+  const deleteVideo = async (id: string) => {
+    if (!confirm('この動画を削除しますか？関連するアンケート・視聴ログも全て削除されます。')) return
+    await supabase.from('briefing_videos').delete().eq('id', id)
+    toast.success('削除しました')
+    fetch()
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* 追加フォーム */}
+      <div className="bg-white rounded-xl border p-6 space-y-4">
+        <h3 className="font-bold text-gray-800">動画を追加</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <input placeholder="タイトル *" value={title} onChange={(e) => setTitle(e.target.value)}
+            className="px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0079B3]" />
+          <input placeholder="YouTube URL *" value={url} onChange={(e) => setUrl(e.target.value)}
+            className="px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0079B3]" />
+        </div>
+        <input placeholder="説明（任意）" value={desc} onChange={(e) => setDesc(e.target.value)}
+          className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0079B3]" />
+        <button onClick={addVideo} disabled={!title || !url}
+          className="px-4 py-2 bg-[#0079B3] text-white rounded-lg text-sm font-medium hover:bg-[#005a86] disabled:opacity-40 flex items-center gap-2">
+          <Plus className="h-4 w-4" /> 追加
+        </button>
+      </div>
+
+      {/* 一覧 */}
+      {loading ? <p className="text-gray-400 text-center py-8">読み込み中...</p> : videos.length === 0 ? (
+        <div className="text-center py-12 text-gray-400">
+          <Video className="h-10 w-10 mx-auto mb-2 opacity-40" />
+          <p>動画がまだありません</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {videos.map((v) => {
+            const ytId = extractYouTubeId(v.youtube_url)
+            return (
+              <div key={v.id} className="bg-white rounded-xl border p-4 flex gap-4 items-center">
+                {ytId && <img src={`https://img.youtube.com/vi/${ytId}/mqdefault.jpg`} alt="" className="w-32 h-18 rounded object-cover shrink-0" />}
+                <div className="flex-1 min-w-0">
+                  <h4 className="font-bold text-gray-800 truncate">{v.title}</h4>
+                  {v.description && <p className="text-sm text-gray-500 truncate">{v.description}</p>}
+                  <p className="text-xs text-gray-400 mt-1">{new Date(v.created_at).toLocaleDateString('ja-JP')}</p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button onClick={() => togglePublish(v.id, v.is_published)}
+                    className={`px-3 py-1.5 rounded-full text-xs font-medium ${v.is_published ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                    {v.is_published ? '公開中' : '非公開'}
+                  </button>
+                  <button onClick={() => deleteVideo(v.id)} className="p-1.5 text-red-400 hover:text-red-600">
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── 学生管理 ───
+function StudentsTab({ companyId }: { companyId: string }) {
+  const [students, setStudents] = useState<Student[]>([])
+  const [loading, setLoading] = useState(true)
+  const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
+
+  const fetch = useCallback(async () => {
+    const { data } = await supabase.from('students').select('*').eq('company_id', companyId).order('created_at', { ascending: false })
+    setStudents(data || [])
+    setLoading(false)
+  }, [companyId])
+
+  useEffect(() => { fetch() }, [fetch])
+
+  const addStudent = async () => {
+    if (!name || !email) return
+    const { error } = await supabase.from('students').insert({ name, email, company_id: companyId })
+    if (error) { toast.error(error.message.includes('unique') ? 'このメールアドレスは既に登録されています' : '追加に失敗しました'); return }
+    setName(''); setEmail('')
+    toast.success('学生を追加しました')
+    fetch()
+  }
+
+  const deleteStudent = async (id: string, sName: string) => {
+    if (!confirm(`${sName} のデータを完全に削除しますか？`)) return
+    await supabase.from('students').delete().eq('id', id)
+    toast.success('削除しました')
+    fetch()
+  }
+
+  const copyUrl = (token: string) => {
+    navigator.clipboard.writeText(`${window.location.origin}/watch?token=${token}`)
+    toast.success('URLをコピーしました')
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-white rounded-xl border p-6 space-y-4">
+        <h3 className="font-bold text-gray-800">学生を追加</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <input placeholder="氏名 *" value={name} onChange={(e) => setName(e.target.value)}
+            className="px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0079B3]" />
+          <input placeholder="メールアドレス *" value={email} onChange={(e) => setEmail(e.target.value)}
+            className="px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0079B3]" />
+        </div>
+        <button onClick={addStudent} disabled={!name || !email}
+          className="px-4 py-2 bg-[#0079B3] text-white rounded-lg text-sm font-medium hover:bg-[#005a86] disabled:opacity-40 flex items-center gap-2">
+          <Plus className="h-4 w-4" /> 追加
+        </button>
+      </div>
+
+      {loading ? <p className="text-gray-400 text-center py-8">読み込み中...</p> : students.length === 0 ? (
+        <div className="text-center py-12 text-gray-400">
+          <Users className="h-10 w-10 mx-auto mb-2 opacity-40" />
+          <p>学生がまだ登録されていません</p>
+        </div>
+      ) : (
+        <div className="bg-white rounded-xl border overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b">
+              <tr>
+                <th className="text-left px-4 py-3 font-medium text-gray-600">氏名</th>
+                <th className="text-left px-4 py-3 font-medium text-gray-600">メールアドレス</th>
+                <th className="text-left px-4 py-3 font-medium text-gray-600">有効期限</th>
+                <th className="text-left px-4 py-3 font-medium text-gray-600">視聴URL</th>
+                <th className="text-right px-4 py-3 font-medium text-gray-600">操作</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {students.map((s) => (
+                <tr key={s.id} className="hover:bg-gray-50">
+                  <td className="px-4 py-3 font-medium">{s.name}</td>
+                  <td className="px-4 py-3 text-gray-500">{s.email}</td>
+                  <td className="px-4 py-3 text-gray-500">{new Date(s.token_expires_at).toLocaleDateString('ja-JP')}</td>
+                  <td className="px-4 py-3">
+                    <button onClick={() => copyUrl(s.token)} className="text-[#0079B3] hover:underline flex items-center gap-1 text-xs">
+                      <Link className="h-3 w-3" /><Copy className="h-3 w-3" /> コピー
+                    </button>
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <button onClick={() => deleteStudent(s.id, s.name)} className="text-red-400 hover:text-red-600">
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── アンケート管理 ───
+function SurveysTab({ companyId }: { companyId: string }) {
+  const [videos, setVideos] = useState<BriefingVideo[]>([])
+  const [questions, setQuestions] = useState<SurveyQuestion[]>([])
+  const [responses, setResponses] = useState<(SurveyResponse & { student?: Student })[]>([])
+  const [loading, setLoading] = useState(true)
+  const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null)
+
+  // 新規設問フォーム
+  const [triggerSec, setTriggerSec] = useState(60)
+  const [qText, setQText] = useState('')
+  const [choices, setChoices] = useState(['', '', '', ''])
+
+  const fetchAll = useCallback(async () => {
+    const { data: vData } = await supabase.from('briefing_videos').select('*').eq('company_id', companyId).order('created_at', { ascending: false })
+    setVideos(vData || [])
+    if (vData && vData.length > 0 && !selectedVideoId) setSelectedVideoId(vData[0].id)
+    setLoading(false)
+  }, [companyId, selectedVideoId])
+
+  useEffect(() => { fetchAll() }, [fetchAll])
+
+  useEffect(() => {
+    if (!selectedVideoId) return
+    const fetchQ = async () => {
+      const { data: qData } = await supabase.from('survey_questions').select('*').eq('video_id', selectedVideoId).order('trigger_sec')
+      setQuestions(qData || [])
+      const { data: rData } = await supabase.from('survey_responses').select('*, student:students(name, email)').eq('video_id', selectedVideoId)
+      setResponses(rData || [])
+    }
+    fetchQ()
+  }, [selectedVideoId])
+
+  const addQuestion = async () => {
+    if (!qText || !selectedVideoId) return
+    const validChoices = choices.filter((c) => c.trim())
+    if (validChoices.length < 2) { toast.error('選択肢を2つ以上入力してください'); return }
+    const { error } = await supabase.from('survey_questions').insert({
+      video_id: selectedVideoId, trigger_sec: triggerSec, question_text: qText,
+      choices: validChoices, company_id: companyId,
+    })
+    if (error) { toast.error('追加に失敗しました'); return }
+    setQText(''); setChoices(['', '', '', '']); setTriggerSec(60)
+    toast.success('設問を追加しました')
+    const { data: qData } = await supabase.from('survey_questions').select('*').eq('video_id', selectedVideoId).order('trigger_sec')
+    setQuestions(qData || [])
+  }
+
+  const deleteQuestion = async (id: string) => {
+    if (!confirm('この設問と回答を削除しますか？')) return
+    await supabase.from('survey_questions').delete().eq('id', id)
+    toast.success('削除しました')
+    setQuestions((prev) => prev.filter((q) => q.id !== id))
+  }
+
+  if (loading) return <p className="text-gray-400 text-center py-8">読み込み中...</p>
+
+  return (
+    <div className="space-y-6">
+      {/* 動画選択 */}
+      <div className="flex gap-2 flex-wrap">
+        {videos.map((v) => (
+          <button key={v.id} onClick={() => setSelectedVideoId(v.id)}
+            className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${selectedVideoId === v.id ? 'bg-[#0079B3] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+            {v.title}
+          </button>
+        ))}
+      </div>
+
+      {selectedVideoId && (
+        <>
+          {/* 設問追加 */}
+          <div className="bg-white rounded-xl border p-6 space-y-4">
+            <h3 className="font-bold text-gray-800">アンケート設問を追加</h3>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div>
+                <label className="text-xs text-gray-500">表示タイミング（秒）</label>
+                <input type="number" value={triggerSec} onChange={(e) => setTriggerSec(Number(e.target.value))}
+                  className="w-full px-3 py-2 border rounded-lg text-sm" min={0} />
+              </div>
+              <div className="md:col-span-3">
+                <label className="text-xs text-gray-500">質問文</label>
+                <input placeholder="例: この説明で最も興味を持ったポイントは？" value={qText} onChange={(e) => setQText(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0079B3]" />
+              </div>
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 mb-1 block">選択肢（2〜4つ）</label>
+              <div className="grid grid-cols-2 gap-2">
+                {choices.map((c, i) => (
+                  <input key={i} placeholder={`選択肢${i + 1}`} value={c}
+                    onChange={(e) => setChoices((prev) => prev.map((p, j) => j === i ? e.target.value : p))}
+                    className="px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0079B3]" />
+                ))}
+              </div>
+            </div>
+            <button onClick={addQuestion} disabled={!qText}
+              className="px-4 py-2 bg-[#0079B3] text-white rounded-lg text-sm font-medium hover:bg-[#005a86] disabled:opacity-40 flex items-center gap-2">
+              <Plus className="h-4 w-4" /> 追加
+            </button>
+          </div>
+
+          {/* 設問一覧 + 回答集計 */}
+          {questions.length === 0 ? (
+            <div className="text-center py-8 text-gray-400">
+              <ClipboardList className="h-10 w-10 mx-auto mb-2 opacity-40" />
+              <p>この動画にはまだ設問がありません</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {questions.map((q) => {
+                const qResponses = responses.filter((r) => r.question_id === q.id)
+                const choiceCounts: Record<string, number> = {}
+                ;(q.choices as string[]).forEach((c) => (choiceCounts[c] = 0))
+                qResponses.forEach((r) => (choiceCounts[r.selected_choice] = (choiceCounts[r.selected_choice] || 0) + 1))
+                const total = qResponses.length
+
+                return (
+                  <div key={q.id} className="bg-white rounded-xl border p-5 space-y-3">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <span className="text-xs bg-[#0079B3]/10 text-[#0079B3] px-2 py-0.5 rounded-full font-medium">
+                          {Math.floor(q.trigger_sec / 60)}:{String(q.trigger_sec % 60).padStart(2, '0')} 後に表示
+                        </span>
+                        <p className="font-bold text-gray-800 mt-2">{q.question_text}</p>
+                      </div>
+                      <button onClick={() => deleteQuestion(q.id)} className="text-red-400 hover:text-red-600 shrink-0">
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                    {/* 回答集計バー */}
+                    <div className="space-y-2">
+                      {Object.entries(choiceCounts).map(([choice, count]) => {
+                        const pct = total > 0 ? (count / total) * 100 : 0
+                        return (
+                          <div key={choice} className="flex items-center gap-3">
+                            <span className="text-sm text-gray-700 w-40 truncate">{choice}</span>
+                            <div className="flex-1 h-6 bg-gray-100 rounded-full overflow-hidden">
+                              <div className="h-full bg-[#0079B3]/70 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                            </div>
+                            <span className="text-xs text-gray-500 w-16 text-right">{count}票 ({pct.toFixed(0)}%)</span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                    <p className="text-xs text-gray-400">回答数: {total}件</p>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+// ─── 視聴ログ ───
+function LogsTab({ companyId }: { companyId: string }) {
+  const [logs, setLogs] = useState<{ student_name: string; student_email: string; video_title: string; played_at: string; watch_sec: number; completed: boolean }[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    const fetchLogs = async () => {
+      const { data: events } = await supabase
+        .from('watch_events')
+        .select('student_id, video_id, event_type, session_id, created_at, student:students(name, email), video:briefing_videos(title)')
+        .eq('company_id', companyId)
+        .order('created_at', { ascending: false })
+
+      if (!events) { setLoading(false); return }
+
+      // セッション別に集計
+      const sessions: Record<string, { student_name: string; student_email: string; video_title: string; played_at: string; heartbeats: number; ended: boolean }> = {}
+      events.forEach((e: any) => {
+        const sid = e.session_id || e.id
+        if (!sessions[sid]) {
+          sessions[sid] = {
+            student_name: e.student?.name || '不明',
+            student_email: e.student?.email || '',
+            video_title: e.video?.title || '不明',
+            played_at: e.created_at,
+            heartbeats: 0,
+            ended: false,
+          }
+        }
+        if (e.event_type === 'heartbeat') sessions[sid].heartbeats++
+        if (e.event_type === 'ended') sessions[sid].ended = true
+        if (e.event_type === 'play' && new Date(e.created_at) < new Date(sessions[sid].played_at)) {
+          sessions[sid].played_at = e.created_at
+        }
+      })
+
+      const result = Object.values(sessions)
+        .map((s) => ({
+          student_name: s.student_name,
+          student_email: s.student_email,
+          video_title: s.video_title,
+          played_at: s.played_at,
+          watch_sec: s.heartbeats * 30,
+          completed: s.ended,
+        }))
+        .sort((a, b) => new Date(b.played_at).getTime() - new Date(a.played_at).getTime())
+
+      setLogs(result)
+      setLoading(false)
+    }
+    fetchLogs()
+  }, [companyId])
+
+  const formatTime = (sec: number) => {
+    const m = Math.floor(sec / 60)
+    const s = sec % 60
+    return `${m}:${String(s).padStart(2, '0')}`
+  }
+
+  if (loading) return <p className="text-gray-400 text-center py-8">読み込み中...</p>
+
+  return logs.length === 0 ? (
+    <div className="text-center py-12 text-gray-400">
+      <Play className="h-10 w-10 mx-auto mb-2 opacity-40" />
+      <p>視聴ログがまだありません</p>
+    </div>
+  ) : (
+    <div className="bg-white rounded-xl border overflow-hidden">
+      <table className="w-full text-sm">
+        <thead className="bg-gray-50 border-b">
+          <tr>
+            <th className="text-left px-4 py-3 font-medium text-gray-600">学生</th>
+            <th className="text-left px-4 py-3 font-medium text-gray-600">動画</th>
+            <th className="text-left px-4 py-3 font-medium text-gray-600">視聴日時</th>
+            <th className="text-left px-4 py-3 font-medium text-gray-600">視聴時間</th>
+            <th className="text-left px-4 py-3 font-medium text-gray-600">完了</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y">
+          {logs.map((log, i) => (
+            <tr key={i} className="hover:bg-gray-50">
+              <td className="px-4 py-3">
+                <div className="font-medium">{log.student_name}</div>
+                <div className="text-xs text-gray-400">{log.student_email}</div>
+              </td>
+              <td className="px-4 py-3 text-gray-600">{log.video_title}</td>
+              <td className="px-4 py-3 text-gray-500">{new Date(log.played_at).toLocaleString('ja-JP')}</td>
+              <td className="px-4 py-3">
+                <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{formatTime(log.watch_sec)}</span>
+              </td>
+              <td className="px-4 py-3">
+                {log.completed ? (
+                  <span className="inline-flex items-center gap-1 text-green-600"><CheckCircle2 className="h-4 w-4" /> 完了</span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-gray-400"><XCircle className="h-4 w-4" /> 途中</span>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+// ─── メインダッシュボード ───
+export function AdminDashboard() {
+  const { adminUser, signOut } = useAuth()
+  const [tab, setTab] = useState<Tab>('videos')
+
+  if (!adminUser) return null
+  const companyId = adminUser.company_id
+  const companyName = adminUser.company?.name || ''
+
+  const tabs: { key: Tab; label: string; icon: React.ReactNode }[] = [
+    { key: 'videos', label: '動画管理', icon: <Video className="h-4 w-4" /> },
+    { key: 'students', label: '学生管理', icon: <Users className="h-4 w-4" /> },
+    { key: 'surveys', label: 'アンケート', icon: <ClipboardList className="h-4 w-4" /> },
+    { key: 'logs', label: '視聴ログ', icon: <BarChart3 className="h-4 w-4" /> },
+  ]
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      {/* ヘッダー */}
+      <header className="bg-white border-b sticky top-0 z-10">
+        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Video className="h-6 w-6 text-[#0079B3]" />
+            <div>
+              <h1 className="font-bold text-[#0079B3] text-lg">説明会動画配信</h1>
+              <p className="text-xs text-gray-400">{companyName}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-4">
+            <span className="text-xs text-gray-400">{adminUser.email}</span>
+            <button onClick={signOut} className="text-gray-400 hover:text-gray-600 flex items-center gap-1 text-sm">
+              <LogOut className="h-4 w-4" /> ログアウト
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* タブ */}
+      <div className="max-w-6xl mx-auto px-6 pt-6">
+        <div className="flex gap-1 border-b">
+          {tabs.map((t) => (
+            <button key={t.key} onClick={() => setTab(t.key)}
+              className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${tab === t.key ? 'border-[#0079B3] text-[#0079B3]' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+              {t.icon} {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* コンテンツ */}
+      <div className="max-w-6xl mx-auto px-6 py-6">
+        {tab === 'videos' && <VideosTab companyId={companyId} />}
+        {tab === 'students' && <StudentsTab companyId={companyId} />}
+        {tab === 'surveys' && <SurveysTab companyId={companyId} />}
+        {tab === 'logs' && <LogsTab companyId={companyId} />}
+      </div>
+    </div>
+  )
+}
