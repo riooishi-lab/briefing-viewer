@@ -1,11 +1,11 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
-import type { BriefingVideo, Student, SurveyQuestion, SurveyResponse, WatchEvent } from '../lib/supabase'
+import type { BriefingVideo, Student, SurveyQuestion, SurveyResponse } from '../lib/supabase'
 import { toast } from 'sonner'
 import {
   Video, Users, BarChart3, ClipboardList, LogOut, Plus, Trash2,
-  Copy, Link, Eye, Clock, CheckCircle2, XCircle, Loader2, Play
+  Copy, Link, Clock, CheckCircle2, XCircle, Play
 } from 'lucide-react'
 
 type Tab = 'videos' | 'students' | 'surveys' | 'logs'
