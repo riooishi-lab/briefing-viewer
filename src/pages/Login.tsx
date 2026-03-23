@@ -19,13 +19,13 @@ export function Login() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0079B3] flex items-center justify-center">
+    <div className="min-h-screen bg-[#1B2A4A] flex items-center justify-center">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-8">
         <div className="text-center mb-6">
-          <div className="bg-[#0079B3] rounded-full p-3 inline-flex mb-3">
+          <div className="bg-[#1B2A4A] rounded-full p-3 inline-flex mb-3">
             <Video className="h-8 w-8 text-white" />
           </div>
-          <h1 className="text-xl font-bold text-[#0079B3]">説明会動画 管理画面</h1>
+          <h1 className="text-xl font-bold text-[#1B2A4A]">説明会動画 管理画面</h1>
           <p className="text-xs text-gray-400 mt-1">企業管理者ログイン</p>
         </div>
 
@@ -36,7 +36,7 @@ export function Login() {
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0079B3] text-sm"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1B2A4A] text-sm"
               required
               autoFocus
             />
@@ -47,7 +47,7 @@ export function Login() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0079B3] text-sm"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1B2A4A] text-sm"
               required
             />
           </div>
@@ -55,7 +55,7 @@ export function Login() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-[#0079B3] text-white py-2.5 rounded-lg font-medium hover:bg-[#005a86] transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+            className="w-full bg-[#1B2A4A] text-white py-2.5 rounded-lg font-medium hover:bg-[#0F1D35] transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
           >
             {loading && <Loader2 className="h-4 w-4 animate-spin" />}
             ログイン
