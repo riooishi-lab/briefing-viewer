@@ -1,11 +1,11 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import type { BriefingVideo, Student, SurveyQuestion, SurveyResponse } from '../lib/supabase'
 import { toast } from 'sonner'
 import {
   Video, Users, BarChart3, ClipboardList, LogOut, Plus, Trash2,
-  Copy, Link, Clock, CheckCircle2, XCircle, Play
+  Copy, Link, Clock, CheckCircle2, XCircle, Play, Upload, Download
 } from 'lucide-react'
 
 type Tab = 'videos' | 'students' | 'surveys' | 'logs'
@@ -110,19 +110,36 @@ function VideosTab({ companyId }: { companyId: string }) {
 }
 
 // ─── 学生管理 ───
+interface StudentWithStatus extends Student {
+  watched: boolean
+}
+
 function StudentsTab({ companyId }: { companyId: string }) {
-  const [students, setStudents] = useState<Student[]>([])
+  const [students, setStudents] = useState<StudentWithStatus[]>([])
   const [loading, setLoading] = useState(true)
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
+  const [csvMode, setCsvMode] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
 
-  const fetch = useCallback(async () => {
+  const fetchStudents = useCallback(async () => {
+    setLoading(true)
     const { data } = await supabase.from('students').select('*').eq('company_id', companyId).order('created_at', { ascending: false })
-    setStudents(data || [])
+    const studentList = data || []
+
+    // 説明会動画の視聴有無を取得（endedイベントがあれば視聴済み）
+    const { data: endedEvents } = await supabase
+      .from('watch_events')
+      .select('student_id')
+      .eq('company_id', companyId)
+      .eq('event_type', 'ended')
+    const watchedSet = new Set((endedEvents || []).map((e: { student_id: string }) => e.student_id))
+
+    setStudents(studentList.map((s: Student) => ({ ...s, watched: watchedSet.has(s.id) })))
     setLoading(false)
   }, [companyId])
 
-  useEffect(() => { fetch() }, [fetch])
+  useEffect(() => { fetchStudents() }, [fetchStudents])
 
   const addStudent = async () => {
     if (!name || !email) return
@@ -130,14 +147,69 @@ function StudentsTab({ companyId }: { companyId: string }) {
     if (error) { toast.error(error.message.includes('unique') ? 'このメールアドレスは既に登録されています' : '追加に失敗しました'); return }
     setName(''); setEmail('')
     toast.success('学生を追加しました')
-    fetch()
+    fetchStudents()
+  }
+
+  // CSV インポート
+  const handleCsvUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const text = await file.text()
+    const lines = text.split(/\r?\n/).filter((l) => l.trim())
+    if (lines.length < 2) { toast.error('CSVに有効なデータがありません'); return }
+
+    const headers = lines[0].split(',').map((h) => h.trim().replace(/^"|"$/g, ''))
+    const nameIdx = headers.findIndex((h) => h === '名前' || h === 'name')
+    const emailIdx = headers.findIndex((h) => h === 'メールアドレス' || h === 'email')
+    if (nameIdx === -1 || emailIdx === -1) {
+      toast.error('ヘッダーに「名前」「メールアドレス」が必要です')
+      return
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    const rows: { name: string; email: string; company_id: string }[] = []
+    const errors: string[] = []
+    const seen = new Set<string>()
+
+    for (let i = 1; i < lines.length; i++) {
+      const cols = lines[i].split(',').map((c) => c.trim().replace(/^"|"$/g, ''))
+      const n = cols[nameIdx]?.trim()
+      const em = cols[emailIdx]?.trim().toLowerCase()
+      if (!n || !em) continue
+      if (!emailRegex.test(em)) { errors.push(`行${i + 1}: メール形式不正 (${em})`); continue }
+      if (seen.has(em)) { errors.push(`行${i + 1}: 重複 (${em})`); continue }
+      seen.add(em)
+      rows.push({ name: n, email: em, company_id: companyId })
+    }
+
+    if (errors.length > 0) {
+      toast.error(errors.slice(0, 3).join('\n') + (errors.length > 3 ? `\n...他${errors.length - 3}件` : ''))
+      return
+    }
+    if (rows.length === 0) { toast.error('有効なデータがありません'); return }
+
+    const { error } = await supabase.from('students').upsert(rows, { onConflict: 'email' })
+    if (error) { toast.error(`インポート失敗: ${error.message}`); return }
+    toast.success(`${rows.length}名をインポートしました`)
+    if (fileRef.current) fileRef.current.value = ''
+    setCsvMode(false)
+    fetchStudents()
+  }
+
+  const downloadSample = () => {
+    const csv = '名前,メールアドレス\n田中太郎,tanaka@example.com\n佐藤花子,sato@example.com'
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = 'students_sample.csv'
+    a.click()
   }
 
   const deleteStudent = async (id: string, sName: string) => {
     if (!confirm(`${sName} のデータを完全に削除しますか？`)) return
     await supabase.from('students').delete().eq('id', id)
     toast.success('削除しました')
-    fetch()
+    fetchStudents()
   }
 
   const copyUrl = (token: string) => {
@@ -147,20 +219,44 @@ function StudentsTab({ companyId }: { companyId: string }) {
 
   return (
     <div className="space-y-6">
+      {/* 追加フォーム */}
       <div className="bg-white rounded-xl border p-6 space-y-4">
-        <h3 className="font-bold text-gray-800">学生を追加</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <input placeholder="氏名 *" value={name} onChange={(e) => setName(e.target.value)}
-            className="px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0079B3]" />
-          <input placeholder="メールアドレス *" value={email} onChange={(e) => setEmail(e.target.value)}
-            className="px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0079B3]" />
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold text-gray-800">学生を追加</h3>
+          <button onClick={() => setCsvMode(!csvMode)}
+            className="text-sm text-[#0079B3] hover:underline flex items-center gap-1">
+            <Upload className="h-3.5 w-3.5" /> {csvMode ? '個別追加に切替' : 'CSVで一括追加'}
+          </button>
         </div>
-        <button onClick={addStudent} disabled={!name || !email}
-          className="px-4 py-2 bg-[#0079B3] text-white rounded-lg text-sm font-medium hover:bg-[#005a86] disabled:opacity-40 flex items-center gap-2">
-          <Plus className="h-4 w-4" /> 追加
-        </button>
+
+        {csvMode ? (
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <input ref={fileRef} type="file" accept=".csv" onChange={handleCsvUpload}
+                className="text-sm file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-[#0079B3] file:text-white file:text-sm file:cursor-pointer" />
+              <button onClick={downloadSample} className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1">
+                <Download className="h-3 w-3" /> サンプルCSV
+              </button>
+            </div>
+            <p className="text-xs text-gray-400">ヘッダー: 名前,メールアドレス（UTF-8）</p>
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <input placeholder="氏名 *" value={name} onChange={(e) => setName(e.target.value)}
+                className="px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0079B3]" />
+              <input placeholder="メールアドレス *" value={email} onChange={(e) => setEmail(e.target.value)}
+                className="px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0079B3]" />
+            </div>
+            <button onClick={addStudent} disabled={!name || !email}
+              className="px-4 py-2 bg-[#0079B3] text-white rounded-lg text-sm font-medium hover:bg-[#005a86] disabled:opacity-40 flex items-center gap-2">
+              <Plus className="h-4 w-4" /> 追加
+            </button>
+          </>
+        )}
       </div>
 
+      {/* 一覧 */}
       {loading ? <p className="text-gray-400 text-center py-8">読み込み中...</p> : students.length === 0 ? (
         <div className="text-center py-12 text-gray-400">
           <Users className="h-10 w-10 mx-auto mb-2 opacity-40" />
@@ -173,6 +269,7 @@ function StudentsTab({ companyId }: { companyId: string }) {
               <tr>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">氏名</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">メールアドレス</th>
+                <th className="text-left px-4 py-3 font-medium text-gray-600">説明会視聴</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">有効期限</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">視聴URL</th>
                 <th className="text-right px-4 py-3 font-medium text-gray-600">操作</th>
@@ -183,6 +280,17 @@ function StudentsTab({ companyId }: { companyId: string }) {
                 <tr key={s.id} className="hover:bg-gray-50">
                   <td className="px-4 py-3 font-medium">{s.name}</td>
                   <td className="px-4 py-3 text-gray-500">{s.email}</td>
+                  <td className="px-4 py-3">
+                    {s.watched ? (
+                      <span className="inline-flex items-center gap-1 text-xs font-medium text-green-700 bg-green-100 px-2 py-1 rounded-full">
+                        <CheckCircle2 className="h-3 w-3" /> 視聴済み
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-xs font-medium text-gray-500 bg-gray-100 px-2 py-1 rounded-full">
+                        <XCircle className="h-3 w-3" /> 未視聴
+                      </span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-gray-500">{new Date(s.token_expires_at).toLocaleDateString('ja-JP')}</td>
                   <td className="px-4 py-3">
                     <button onClick={() => copyUrl(s.token)} className="text-[#0079B3] hover:underline flex items-center gap-1 text-xs">
@@ -376,36 +484,47 @@ function LogsTab({ companyId }: { companyId: string }) {
 
       if (!events) { setLoading(false); return }
 
-      // セッション別に集計
-      const sessions: Record<string, { student_name: string; student_email: string; video_title: string; played_at: string; heartbeats: number; ended: boolean }> = {}
+      // セッション別に集計（play〜最終イベントの時刻差分で実視聴時間を計算）
+      const sessions: Record<string, {
+        student_name: string; student_email: string; video_title: string;
+        first_at: number; last_at: number; ended: boolean; last_position: number;
+      }> = {}
       events.forEach((e: any) => {
         const sid = e.session_id || e.id
+        const t = new Date(e.created_at).getTime()
         if (!sessions[sid]) {
           sessions[sid] = {
             student_name: e.student?.name || '不明',
             student_email: e.student?.email || '',
             video_title: e.video?.title || '不明',
-            played_at: e.created_at,
-            heartbeats: 0,
+            first_at: t,
+            last_at: t,
             ended: false,
+            last_position: e.position_sec || 0,
           }
         }
-        if (e.event_type === 'heartbeat') sessions[sid].heartbeats++
-        if (e.event_type === 'ended') sessions[sid].ended = true
-        if (e.event_type === 'play' && new Date(e.created_at) < new Date(sessions[sid].played_at)) {
-          sessions[sid].played_at = e.created_at
+        if (t < sessions[sid].first_at) sessions[sid].first_at = t
+        if (t > sessions[sid].last_at) {
+          sessions[sid].last_at = t
+          sessions[sid].last_position = e.position_sec || sessions[sid].last_position
         }
+        if (e.event_type === 'ended') sessions[sid].ended = true
       })
 
       const result = Object.values(sessions)
-        .map((s) => ({
-          student_name: s.student_name,
-          student_email: s.student_email,
-          video_title: s.video_title,
-          played_at: s.played_at,
-          watch_sec: s.heartbeats * 30,
-          completed: s.ended,
-        }))
+        .map((s) => {
+          // position_secが記録されていればそちらを優先、なければ時刻差分
+          const timeDiffSec = Math.floor((s.last_at - s.first_at) / 1000)
+          const watchSec = s.last_position > 0 ? Math.round(s.last_position) : timeDiffSec
+          return {
+            student_name: s.student_name,
+            student_email: s.student_email,
+            video_title: s.video_title,
+            played_at: new Date(s.first_at).toISOString(),
+            watch_sec: watchSec,
+            completed: s.ended,
+          }
+        })
         .sort((a, b) => new Date(b.played_at).getTime() - new Date(a.played_at).getTime())
 
       setLogs(result)

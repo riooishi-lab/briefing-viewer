@@ -87,7 +87,7 @@ export function StudentViewer() {
     }
   }, [questions, answeredIds, activeQuestion])
 
-  // アンケート回答
+  // アンケート回答 → 回答時点から再生を再開
   const handleAnswer = async (choice: string) => {
     if (!activeQuestion || !student || !video) return
     await supabase.from('survey_responses').insert({
@@ -100,7 +100,13 @@ export function StudentViewer() {
     })
     setAnsweredIds((prev) => new Set([...prev, activeQuestion.id]))
     setActiveQuestion(null)
-    playerRef.current?.playVideo()
+    const player = playerRef.current
+    if (player) {
+      // 一時停止した位置（= アンケート表示位置）から再生を再開
+      const currentPos = player.getCurrentTime()
+      player.seekTo(currentPos, true)
+      player.playVideo()
+    }
   }
 
   // 初期化
