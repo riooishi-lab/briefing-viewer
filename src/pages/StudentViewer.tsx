@@ -40,9 +40,8 @@ function SurveyOverlay({
 
 // 動画の種類を判定するヘルパー
 function getVideoType(v: BriefingVideo): 'youtube' | 'upload' | 'none' {
-  const ytId = extractYouTubeId(v.youtube_url)
-  if (ytId) return 'youtube'
-  if (v.video_url) return 'upload'
+  if (v.youtube_url && v.youtube_url.trim()) return 'youtube'
+  if (v.video_url && v.video_url.trim()) return 'upload'
   return 'none'
 }
 
@@ -142,10 +141,20 @@ export function StudentViewer() {
       }
       setStudent(sd)
 
-      const { data: vd } = await supabase.from('briefing_videos').select('*')
-        .eq('company_id', sd.company_id).eq('is_published', true)
-        .order('created_at', { ascending: false }).limit(1).maybeSingle()
-      if (!vd) { setError('現在公開中の説明会動画はありません。'); setLoading(false); return }
+      // company_idで動画を取得、見つからなければcompany_idなしで全公開動画から取得
+      let vdQuery = supabase.from('briefing_videos').select('*').eq('is_published', true)
+        .order('created_at', { ascending: false }).limit(1)
+      if (sd.company_id) {
+        vdQuery = supabase.from('briefing_videos').select('*')
+          .eq('company_id', sd.company_id).eq('is_published', true)
+          .order('created_at', { ascending: false }).limit(1)
+      }
+      const { data: vd } = await vdQuery.maybeSingle()
+      if (!vd) {
+        setError('現在公開中の説明会動画はありません。\n管理画面で動画を「公開」に設定してください。')
+        setLoading(false); return
+      }
+      console.log('[StudentViewer] video loaded:', vd.id, 'type:', vd.youtube_url ? 'youtube' : 'upload', 'youtube_url:', vd.youtube_url, 'video_url:', vd.video_url)
       setVideo(vd)
 
       const { data: qd } = await supabase.from('survey_questions').select('*')
@@ -197,7 +206,11 @@ export function StudentViewer() {
   // ─── YouTube Player 初期化 ───
   useEffect(() => {
     if (!video || getVideoType(video) !== 'youtube') return
-    const youtubeId = extractYouTubeId(video.youtube_url)!
+    const youtubeId = extractYouTubeId(video.youtube_url)
+    if (!youtubeId) {
+      console.error('[YT] Could not extract YouTube ID from:', video.youtube_url)
+      return
+    }
 
     let destroyed = false
 
