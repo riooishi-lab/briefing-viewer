@@ -4,7 +4,6 @@ import type { Student, BriefingVideo, SurveyQuestion } from '../lib/supabase'
 import { v4 as uuidv4 } from 'uuid'
 import { AlertCircle, CheckCircle2 } from 'lucide-react'
 
-// YouTube ID 抽出
 const extractYouTubeId = (url: string): string | null => {
   const m = url.match(/(?:youtube\.com\/(?:[^/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?/\s]{11})/i)
   return m ? m[1] : null
@@ -19,7 +18,6 @@ function SurveyOverlay({
   onAnswer: (choice: string) => void
 }) {
   const choices = (question.choices as string[]) || []
-
   return (
     <div className="absolute bottom-0 left-0 right-0 h-1/3 bg-black/80 backdrop-blur-sm flex items-center justify-center z-10">
       <div className="bg-white rounded-t-xl p-5 w-full h-full flex flex-col justify-center max-w-2xl mx-auto">
@@ -40,7 +38,6 @@ function SurveyOverlay({
   )
 }
 
-// ─── メインコンポーネント ───
 export function StudentViewer() {
   const [student, setStudent] = useState<Student | null>(null)
   const [video, setVideo] = useState<BriefingVideo | null>(null)
@@ -52,67 +49,79 @@ export function StudentViewer() {
   const [completed, setCompleted] = useState(false)
 
   const playerRef = useRef<any>(null)
+  const nativeVideoRef = useRef<HTMLVideoElement>(null)
   const sessionIdRef = useRef<string>(uuidv4())
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const surveyCheckRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  // シークで飛ばされた設問を検出するため、前回チェック位置を記録
   const prevCheckPosRef = useRef<number>(0)
 
-  const companyId = student?.company_id || ''
+  // Ref版で最新のstateを参照（useEffect依存を減らしプレーヤー再生成を防止）
+  const questionsRef = useRef<SurveyQuestion[]>([])
+  const answeredIdsRef = useRef<Set<string>>(new Set())
+  const activeQuestionRef = useRef<SurveyQuestion | null>(null)
+  const studentRef = useRef<Student | null>(null)
+  const videoRef = useRef<BriefingVideo | null>(null)
 
-  // 視聴イベント記録
+  questionsRef.current = questions
+  answeredIdsRef.current = answeredIds
+  activeQuestionRef.current = activeQuestion
+  studentRef.current = student
+  videoRef.current = video
+
+  const isUploadVideo = !video?.youtube_url && !!video?.video_url
+
+  // 視聴イベント記録（ref経由で常に最新のstudent/videoを参照）
   const recordEvent = useCallback(async (eventType: string, positionSec: number) => {
-    if (!student || !video) return
+    const s = studentRef.current
+    const v = videoRef.current
+    if (!s || !v) return
     await supabase.from('watch_events').insert({
-      student_id: student.id,
-      video_id: video.id,
+      student_id: s.id,
+      video_id: v.id,
       event_type: eventType,
       position_sec: positionSec,
       session_id: sessionIdRef.current,
-      company_id: companyId,
+      company_id: s.company_id,
     })
-  }, [student, video, companyId])
+  }, []) // 依存なし — refで最新値を取得
 
-  // アンケートトリガーチェック
-  // シークで飛ばした場合も、prevPos〜currentPos間の未回答設問を検出
+  // アンケートトリガーチェック（ref経由）
   const checkSurveyTrigger = useCallback((currentTime: number) => {
-    if (activeQuestion) return // 既に表示中
+    if (activeQuestionRef.current) return
 
     const sec = Math.floor(currentTime)
     const prevSec = prevCheckPosRef.current
     prevCheckPosRef.current = sec
 
-    for (const q of questions) {
-      if (answeredIds.has(q.id)) continue
-
-      // 通常再生: trigger_secを通過した
-      // シーク: prevSecからsecの間にtrigger_secがある、またはシーク先がtrigger_sec以降
+    for (const q of questionsRef.current) {
+      if (answeredIdsRef.current.has(q.id)) continue
       const triggered =
-        (sec >= q.trigger_sec && prevSec < q.trigger_sec) || // 通常通過
-        (sec >= q.trigger_sec && Math.abs(sec - prevSec) > 3) // シークで飛ばした
-
+        (sec >= q.trigger_sec && prevSec < q.trigger_sec) ||
+        (sec >= q.trigger_sec && Math.abs(sec - prevSec) > 3)
       if (triggered) {
         setActiveQuestion(q)
-        // ④ 動画は一時停止しない（再生継続）
         break
       }
     }
-  }, [questions, answeredIds, activeQuestion])
+  }, []) // 依存なし — refで最新値を取得
 
-  // アンケート回答 → 動画はそのまま再生継続
+  // アンケート回答（動画は停止しない。回答後もそのまま再生継続）
   const handleAnswer = async (choice: string) => {
-    if (!activeQuestion || !student || !video) return
+    const q = activeQuestionRef.current
+    const s = studentRef.current
+    const v = videoRef.current
+    if (!q || !s || !v) return
     await supabase.from('survey_responses').insert({
-      student_id: student.id,
-      question_id: activeQuestion.id,
-      video_id: video.id,
+      student_id: s.id,
+      question_id: q.id,
+      video_id: v.id,
       selected_choice: choice,
       session_id: sessionIdRef.current,
-      company_id: companyId,
+      company_id: s.company_id,
     })
-    setAnsweredIds((prev) => new Set([...prev, activeQuestion.id]))
+    setAnsweredIds((prev) => new Set([...prev, q.id]))
     setActiveQuestion(null)
-    // ③ 動画は再生中のまま → 回答後もそのまま続きが見れる
+    // 動画は再生中のまま — 何もしない
   }
 
   // 初期化
@@ -126,17 +135,13 @@ export function StudentViewer() {
       }
 
       const { data: studentData } = await supabase
-        .from('students')
-        .select('*')
-        .eq('token', token)
-        .maybeSingle()
+        .from('students').select('*').eq('token', token).maybeSingle()
 
       if (!studentData) {
         setError('URLが無効です。採用担当者にご連絡ください。')
         setLoading(false)
         return
       }
-
       if (new Date(studentData.token_expires_at) < new Date()) {
         setError('このURLの有効期限が切れています。\n採用担当者に新しいURLの発行をご依頼ください。')
         setLoading(false)
@@ -146,62 +151,56 @@ export function StudentViewer() {
       setStudent(studentData)
 
       const { data: videoData } = await supabase
-        .from('briefing_videos')
-        .select('*')
+        .from('briefing_videos').select('*')
         .eq('company_id', studentData.company_id)
         .eq('is_published', true)
         .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
+        .limit(1).maybeSingle()
 
       if (!videoData) {
         setError('現在公開中の説明会動画はありません。')
         setLoading(false)
         return
       }
-
       setVideo(videoData)
 
       const { data: qData } = await supabase
-        .from('survey_questions')
-        .select('*')
+        .from('survey_questions').select('*')
         .eq('video_id', videoData.id)
         .order('trigger_sec', { ascending: true })
-
       setQuestions(qData || [])
 
       const { data: rData } = await supabase
-        .from('survey_responses')
-        .select('question_id')
+        .from('survey_responses').select('question_id')
         .eq('student_id', studentData.id)
         .eq('video_id', videoData.id)
-
       setAnsweredIds(new Set((rData || []).map((r: { question_id: string }) => r.question_id)))
       setLoading(false)
     }
-
     init()
   }, [])
 
-  const isUploadVideo = !video?.youtube_url && !!video?.video_url
-  const nativeVideoRef = useRef<HTMLVideoElement>(null)
-
-  // アンケートチェック用の共通ループ開始
+  // アンケートチェック共通ループ
   const startSurveyCheck = useCallback(() => {
     if (surveyCheckRef.current) clearInterval(surveyCheckRef.current)
     surveyCheckRef.current = setInterval(() => {
+      const v = videoRef.current
+      if (!v) return
+      const isUpload = !v.youtube_url && !!v.video_url
       let currentTime = 0
-      if (isUploadVideo && nativeVideoRef.current) {
-        if (!nativeVideoRef.current.paused) currentTime = nativeVideoRef.current.currentTime
-        else return
-      } else if (playerRef.current) {
-        const state = playerRef.current.getPlayerState()
-        if (state === (window as any).YT?.PlayerState?.PLAYING) currentTime = playerRef.current.getCurrentTime()
-        else return
+      if (isUpload && nativeVideoRef.current) {
+        if (nativeVideoRef.current.paused) return
+        currentTime = nativeVideoRef.current.currentTime
+      } else if (playerRef.current?.getCurrentTime) {
+        try {
+          const state = playerRef.current.getPlayerState()
+          if (state !== (window as any).YT?.PlayerState?.PLAYING) return
+          currentTime = playerRef.current.getCurrentTime()
+        } catch { return }
       } else return
       checkSurveyTrigger(currentTime)
     }, 1000)
-  }, [isUploadVideo, checkSurveyTrigger])
+  }, [checkSurveyTrigger])
 
   // ネイティブ動画（アップロード）のイベントハンドラ
   useEffect(() => {
@@ -238,7 +237,7 @@ export function StudentViewer() {
     }
   }, [video, isUploadVideo, recordEvent, startSurveyCheck])
 
-  // YouTube Player 初期化
+  // YouTube Player 初期化（依存を最小限にしてプレーヤー再生成を防止）
   useEffect(() => {
     if (!video || isUploadVideo) return
     const youtubeId = video.youtube_url ? extractYouTubeId(video.youtube_url) : null
@@ -286,7 +285,9 @@ export function StudentViewer() {
       if (surveyCheckRef.current) clearInterval(surveyCheckRef.current)
       playerRef.current?.destroy()
     }
-  }, [video, isUploadVideo, recordEvent, startSurveyCheck])
+    // video.idのみ依存（answeredIds等の変更でプレーヤーが再生成されない）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [video?.id])
 
   if (loading) {
     return (
