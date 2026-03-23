@@ -5,7 +5,7 @@ import type { BriefingVideo, Student, SurveyQuestion, SurveyResponse } from '../
 import { toast } from 'sonner'
 import {
   Video, Users, BarChart3, ClipboardList, LogOut, Plus, Trash2,
-  Copy, Link, Clock, CheckCircle2, XCircle, Play, Upload, Download
+  Copy, Link, Clock, CheckCircle2, XCircle, Play, Upload, Download, Loader2
 } from 'lucide-react'
 
 type Tab = 'videos' | 'students' | 'surveys' | 'logs'
@@ -17,63 +17,125 @@ const extractYouTubeId = (url: string): string | null => {
 }
 
 // ─── 動画管理 ───
+type AddMode = 'youtube' | 'upload'
+
 function VideosTab({ companyId }: { companyId: string }) {
   const [videos, setVideos] = useState<BriefingVideo[]>([])
   const [loading, setLoading] = useState(true)
   const [title, setTitle] = useState('')
   const [url, setUrl] = useState('')
   const [desc, setDesc] = useState('')
+  const [addMode, setAddMode] = useState<AddMode>('youtube')
+  const [uploading, setUploading] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
 
-  const fetch = useCallback(async () => {
+  const fetchVideos = useCallback(async () => {
     const { data } = await supabase.from('briefing_videos').select('*').eq('company_id', companyId).order('created_at', { ascending: false })
     setVideos(data || [])
     setLoading(false)
   }, [companyId])
 
-  useEffect(() => { fetch() }, [fetch])
+  useEffect(() => { fetchVideos() }, [fetchVideos])
 
-  const addVideo = async () => {
+  const addYouTubeVideo = async () => {
     if (!title || !url) return
     if (!extractYouTubeId(url)) { toast.error('有効なYouTube URLを入力してください'); return }
     const { error } = await supabase.from('briefing_videos').insert({ title, youtube_url: url, description: desc || null, company_id: companyId })
     if (error) { toast.error('追加に失敗しました'); return }
     setTitle(''); setUrl(''); setDesc('')
     toast.success('動画を追加しました')
-    fetch()
+    fetchVideos()
+  }
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file || !title) return
+    if (!file.type.startsWith('video/')) { toast.error('動画ファイルを選択してください'); return }
+    if (file.size > 500 * 1024 * 1024) { toast.error('ファイルサイズは500MB以下にしてください'); return }
+
+    setUploading(true)
+    const ext = file.name.split('.').pop() || 'mp4'
+    const path = `${companyId}/${crypto.randomUUID()}.${ext}`
+
+    const { error: uploadError } = await supabase.storage.from('videos').upload(path, file, { contentType: file.type })
+    if (uploadError) {
+      toast.error(`アップロード失敗: ${uploadError.message}`)
+      setUploading(false)
+      return
+    }
+
+    const { data: urlData } = supabase.storage.from('videos').getPublicUrl(path)
+    const publicUrl = urlData.publicUrl
+
+    const { error: dbError } = await supabase.from('briefing_videos').insert({
+      title, description: desc || null, video_url: publicUrl, company_id: companyId,
+    })
+    if (dbError) { toast.error('DB登録に失敗しました'); setUploading(false); return }
+
+    setTitle(''); setDesc('')
+    if (fileRef.current) fileRef.current.value = ''
+    setUploading(false)
+    toast.success('動画をアップロードしました')
+    fetchVideos()
   }
 
   const togglePublish = async (id: string, current: boolean) => {
     await supabase.from('briefing_videos').update({ is_published: !current }).eq('id', id)
-    fetch()
+    fetchVideos()
   }
 
   const deleteVideo = async (id: string) => {
     if (!confirm('この動画を削除しますか？関連するアンケート・視聴ログも全て削除されます。')) return
     await supabase.from('briefing_videos').delete().eq('id', id)
     toast.success('削除しました')
-    fetch()
+    fetchVideos()
   }
 
   return (
     <div className="space-y-6">
-      {/* 追加フォーム */}
       <div className="bg-white rounded-xl border p-6 space-y-4">
-        <h3 className="font-bold text-gray-800">動画を追加</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <input placeholder="タイトル *" value={title} onChange={(e) => setTitle(e.target.value)}
-            className="px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0079B3]" />
-          <input placeholder="YouTube URL *" value={url} onChange={(e) => setUrl(e.target.value)}
-            className="px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0079B3]" />
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold text-gray-800">動画を追加</h3>
+          <div className="flex gap-1 bg-gray-100 rounded-lg p-0.5">
+            <button onClick={() => setAddMode('youtube')}
+              className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${addMode === 'youtube' ? 'bg-white shadow text-[#0079B3]' : 'text-gray-500'}`}>
+              YouTube URL
+            </button>
+            <button onClick={() => setAddMode('upload')}
+              className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${addMode === 'upload' ? 'bg-white shadow text-[#0079B3]' : 'text-gray-500'}`}>
+              ファイルアップロード
+            </button>
+          </div>
         </div>
-        <input placeholder="説明（任意）" value={desc} onChange={(e) => setDesc(e.target.value)}
+
+        <input placeholder="タイトル *" value={title} onChange={(e) => setTitle(e.target.value)}
           className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0079B3]" />
-        <button onClick={addVideo} disabled={!title || !url}
-          className="px-4 py-2 bg-[#0079B3] text-white rounded-lg text-sm font-medium hover:bg-[#005a86] disabled:opacity-40 flex items-center gap-2">
-          <Plus className="h-4 w-4" /> 追加
-        </button>
+
+        {addMode === 'youtube' ? (
+          <>
+            <input placeholder="YouTube URL *" value={url} onChange={(e) => setUrl(e.target.value)}
+              className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0079B3]" />
+            <input placeholder="説明（任意）" value={desc} onChange={(e) => setDesc(e.target.value)}
+              className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0079B3]" />
+            <button onClick={addYouTubeVideo} disabled={!title || !url}
+              className="px-4 py-2 bg-[#0079B3] text-white rounded-lg text-sm font-medium hover:bg-[#005a86] disabled:opacity-40 flex items-center gap-2">
+              <Plus className="h-4 w-4" /> 追加
+            </button>
+          </>
+        ) : (
+          <>
+            <input placeholder="説明（任意）" value={desc} onChange={(e) => setDesc(e.target.value)}
+              className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0079B3]" />
+            <div className="flex items-center gap-3">
+              <input ref={fileRef} type="file" accept="video/*" onChange={handleFileUpload} disabled={!title || uploading}
+                className="text-sm file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-[#0079B3] file:text-white file:text-sm file:cursor-pointer disabled:opacity-40" />
+              {uploading && <span className="flex items-center gap-1 text-sm text-[#0079B3]"><Loader2 className="h-4 w-4 animate-spin" /> アップロード中...</span>}
+            </div>
+            <p className="text-xs text-gray-400">対応形式: MP4, WebM, MOV（500MB以下）</p>
+          </>
+        )}
       </div>
 
-      {/* 一覧 */}
       {loading ? <p className="text-gray-400 text-center py-8">読み込み中...</p> : videos.length === 0 ? (
         <div className="text-center py-12 text-gray-400">
           <Video className="h-10 w-10 mx-auto mb-2 opacity-40" />
@@ -82,14 +144,23 @@ function VideosTab({ companyId }: { companyId: string }) {
       ) : (
         <div className="space-y-3">
           {videos.map((v) => {
-            const ytId = extractYouTubeId(v.youtube_url)
+            const ytId = v.youtube_url ? extractYouTubeId(v.youtube_url) : null
+            const isUpload = !v.youtube_url && v.video_url
             return (
               <div key={v.id} className="bg-white rounded-xl border p-4 flex gap-4 items-center">
-                {ytId && <img src={`https://img.youtube.com/vi/${ytId}/mqdefault.jpg`} alt="" className="w-32 h-18 rounded object-cover shrink-0" />}
+                {ytId ? (
+                  <img src={`https://img.youtube.com/vi/${ytId}/mqdefault.jpg`} alt="" className="w-32 h-18 rounded object-cover shrink-0" />
+                ) : isUpload ? (
+                  <div className="w-32 h-18 rounded bg-gray-100 flex items-center justify-center shrink-0">
+                    <Upload className="h-6 w-6 text-gray-400" />
+                  </div>
+                ) : null}
                 <div className="flex-1 min-w-0">
                   <h4 className="font-bold text-gray-800 truncate">{v.title}</h4>
                   {v.description && <p className="text-sm text-gray-500 truncate">{v.description}</p>}
-                  <p className="text-xs text-gray-400 mt-1">{new Date(v.created_at).toLocaleDateString('ja-JP')}</p>
+                  <p className="text-xs text-gray-400 mt-1">
+                    {isUpload ? 'アップロード動画' : 'YouTube'} • {new Date(v.created_at).toLocaleDateString('ja-JP')}
+                  </p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <button onClick={() => togglePublish(v.id, v.is_published)}
