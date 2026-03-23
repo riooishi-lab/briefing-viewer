@@ -9,7 +9,6 @@ const extractYouTubeId = (url: string): string | null => {
   return m ? m[1] : null
 }
 
-// ─── アンケートオーバーレイ（画面下部1/3、動画再生は継続）───
 function SurveyOverlay({
   question,
   onAnswer,
@@ -47,6 +46,7 @@ export function StudentViewer() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
   const [completed, setCompleted] = useState(false)
+  const [playerReady, setPlayerReady] = useState(false)
 
   const playerRef = useRef<any>(null)
   const nativeVideoRef = useRef<HTMLVideoElement>(null)
@@ -54,8 +54,9 @@ export function StudentViewer() {
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const surveyCheckRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const prevCheckPosRef = useRef<number>(0)
+  const playerInitializedRef = useRef(false)
 
-  // Ref版で最新のstateを参照（useEffect依存を減らしプレーヤー再生成を防止）
+  // Ref版で最新stateを参照
   const questionsRef = useRef<SurveyQuestion[]>([])
   const answeredIdsRef = useRef<Set<string>>(new Set())
   const activeQuestionRef = useRef<SurveyQuestion | null>(null)
@@ -68,9 +69,6 @@ export function StudentViewer() {
   studentRef.current = student
   videoRef.current = video
 
-  const isUploadVideo = !video?.youtube_url && !!video?.video_url
-
-  // 視聴イベント記録（ref経由で常に最新のstudent/videoを参照）
   const recordEvent = useCallback(async (eventType: string, positionSec: number) => {
     const s = studentRef.current
     const v = videoRef.current
@@ -83,16 +81,13 @@ export function StudentViewer() {
       session_id: sessionIdRef.current,
       company_id: s.company_id,
     })
-  }, []) // 依存なし — refで最新値を取得
+  }, [])
 
-  // アンケートトリガーチェック（ref経由）
   const checkSurveyTrigger = useCallback((currentTime: number) => {
     if (activeQuestionRef.current) return
-
     const sec = Math.floor(currentTime)
     const prevSec = prevCheckPosRef.current
     prevCheckPosRef.current = sec
-
     for (const q of questionsRef.current) {
       if (answeredIdsRef.current.has(q.id)) continue
       const triggered =
@@ -103,84 +98,8 @@ export function StudentViewer() {
         break
       }
     }
-  }, []) // 依存なし — refで最新値を取得
-
-  // アンケート回答（動画は停止しない。回答後もそのまま再生継続）
-  const handleAnswer = async (choice: string) => {
-    const q = activeQuestionRef.current
-    const s = studentRef.current
-    const v = videoRef.current
-    if (!q || !s || !v) return
-    await supabase.from('survey_responses').insert({
-      student_id: s.id,
-      question_id: q.id,
-      video_id: v.id,
-      selected_choice: choice,
-      session_id: sessionIdRef.current,
-      company_id: s.company_id,
-    })
-    setAnsweredIds((prev) => new Set([...prev, q.id]))
-    setActiveQuestion(null)
-    // 動画は再生中のまま — 何もしない
-  }
-
-  // 初期化
-  useEffect(() => {
-    const init = async () => {
-      const token = new URLSearchParams(window.location.search).get('token')
-      if (!token) {
-        setError('URLにトークンが含まれていません。正しいURLからアクセスしてください。')
-        setLoading(false)
-        return
-      }
-
-      const { data: studentData } = await supabase
-        .from('students').select('*').eq('token', token).maybeSingle()
-
-      if (!studentData) {
-        setError('URLが無効です。採用担当者にご連絡ください。')
-        setLoading(false)
-        return
-      }
-      if (new Date(studentData.token_expires_at) < new Date()) {
-        setError('このURLの有効期限が切れています。\n採用担当者に新しいURLの発行をご依頼ください。')
-        setLoading(false)
-        return
-      }
-
-      setStudent(studentData)
-
-      const { data: videoData } = await supabase
-        .from('briefing_videos').select('*')
-        .eq('company_id', studentData.company_id)
-        .eq('is_published', true)
-        .order('created_at', { ascending: false })
-        .limit(1).maybeSingle()
-
-      if (!videoData) {
-        setError('現在公開中の説明会動画はありません。')
-        setLoading(false)
-        return
-      }
-      setVideo(videoData)
-
-      const { data: qData } = await supabase
-        .from('survey_questions').select('*')
-        .eq('video_id', videoData.id)
-        .order('trigger_sec', { ascending: true })
-      setQuestions(qData || [])
-
-      const { data: rData } = await supabase
-        .from('survey_responses').select('question_id')
-        .eq('student_id', studentData.id)
-        .eq('video_id', videoData.id)
-      setAnsweredIds(new Set((rData || []).map((r: { question_id: string }) => r.question_id)))
-      setLoading(false)
-    }
-    init()
   }, [])
 
-  // アンケートチェック共通ループ
   const startSurveyCheck = useCallback(() => {
     if (surveyCheckRef.current) clearInterval(surveyCheckRef.current)
     surveyCheckRef.current = setInterval(() => {
@@ -202,9 +121,90 @@ export function StudentViewer() {
     }, 1000)
   }, [checkSurveyTrigger])
 
+  const handleAnswer = async (choice: string) => {
+    const q = activeQuestionRef.current
+    const s = studentRef.current
+    const v = videoRef.current
+    if (!q || !s || !v) return
+    await supabase.from('survey_responses').insert({
+      student_id: s.id,
+      question_id: q.id,
+      video_id: v.id,
+      selected_choice: choice,
+      session_id: sessionIdRef.current,
+      company_id: s.company_id,
+    })
+    setAnsweredIds((prev) => new Set([...prev, q.id]))
+    setActiveQuestion(null)
+  }
+
+  // 初期化
+  useEffect(() => {
+    const init = async () => {
+      const token = new URLSearchParams(window.location.search).get('token')
+      if (!token) {
+        setError('URLにトークンが含まれていません。正しいURLからアクセスしてください。')
+        setLoading(false)
+        return
+      }
+
+      const { data: studentData } = await supabase
+        .from('students').select('*').eq('token', token).maybeSingle()
+      if (!studentData) {
+        setError('URLが無効です。採用担当者にご連絡ください。')
+        setLoading(false)
+        return
+      }
+      if (new Date(studentData.token_expires_at) < new Date()) {
+        setError('このURLの有効期限が切れています。\n採用担当者に新しいURLの発行をご依頼ください。')
+        setLoading(false)
+        return
+      }
+      setStudent(studentData)
+
+      const { data: videoData } = await supabase
+        .from('briefing_videos').select('*')
+        .eq('company_id', studentData.company_id)
+        .eq('is_published', true)
+        .order('created_at', { ascending: false })
+        .limit(1).maybeSingle()
+      if (!videoData) {
+        setError('現在公開中の説明会動画はありません。')
+        setLoading(false)
+        return
+      }
+      setVideo(videoData)
+
+      const { data: qData } = await supabase
+        .from('survey_questions').select('*')
+        .eq('video_id', videoData.id)
+        .order('trigger_sec', { ascending: true })
+      setQuestions(qData || [])
+
+      const { data: rData } = await supabase
+        .from('survey_responses').select('question_id')
+        .eq('student_id', studentData.id)
+        .eq('video_id', videoData.id)
+      setAnsweredIds(new Set((rData || []).map((r: { question_id: string }) => r.question_id)))
+      setLoading(false)
+    }
+    init()
+
+    // 動画の公開状態変更をリアルタイムで反映
+    const channel = supabase
+      .channel('briefing-video-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'briefing_videos' }, () => {
+        // 動画が追加/更新されたらページをリロードして最新を表示
+        window.location.reload()
+      })
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
+  }, [])
+
   // ネイティブ動画（アップロード）のイベントハンドラ
   useEffect(() => {
-    if (!video || !isUploadVideo) return
+    if (!video || !(!video.youtube_url && video.video_url)) return
     const el = nativeVideoRef.current
     if (!el) return
 
@@ -235,59 +235,65 @@ export function StudentViewer() {
       if (heartbeatRef.current) clearInterval(heartbeatRef.current)
       if (surveyCheckRef.current) clearInterval(surveyCheckRef.current)
     }
-  }, [video, isUploadVideo, recordEvent, startSurveyCheck])
+  }, [video?.id, recordEvent, startSurveyCheck])
 
-  // YouTube Player 初期化（依存を最小限にしてプレーヤー再生成を防止）
+  // YouTube IFrame API のスクリプトを事前ロード
   useEffect(() => {
-    if (!video || isUploadVideo) return
-    const youtubeId = video.youtube_url ? extractYouTubeId(video.youtube_url) : null
-    if (!youtubeId) return
-
-    const initPlayer = () => {
-      playerRef.current = new (window as any).YT.Player('yt-player', {
-        videoId: youtubeId,
-        playerVars: { rel: 0, modestbranding: 1 },
-        events: {
-          onStateChange: (event: any) => {
-            const p = playerRef.current
-            if (!p) return
-            const pos = p.getCurrentTime()
-            if (event.data === (window as any).YT.PlayerState.PLAYING) {
-              recordEvent('play', pos)
-              if (heartbeatRef.current) clearInterval(heartbeatRef.current)
-              heartbeatRef.current = setInterval(() => recordEvent('heartbeat', p.getCurrentTime()), 30000)
-              startSurveyCheck()
-            } else if (event.data === (window as any).YT.PlayerState.PAUSED) {
-              recordEvent('pause', pos)
-              if (heartbeatRef.current) clearInterval(heartbeatRef.current)
-            } else if (event.data === (window as any).YT.PlayerState.ENDED) {
-              recordEvent('ended', p.getDuration())
-              if (heartbeatRef.current) clearInterval(heartbeatRef.current)
-              if (surveyCheckRef.current) clearInterval(surveyCheckRef.current)
-              setCompleted(true)
-            }
-          },
-        },
-      })
-    }
-
     if ((window as any).YT?.Player) {
-      initPlayer()
-    } else {
-      const tag = document.createElement('script')
-      tag.src = 'https://www.youtube.com/iframe_api'
-      document.head.appendChild(tag)
-      ;(window as any).onYouTubeIframeAPIReady = initPlayer
+      setPlayerReady(true)
+      return
     }
+    if (document.querySelector('script[src*="youtube.com/iframe_api"]')) return
+    const tag = document.createElement('script')
+    tag.src = 'https://www.youtube.com/iframe_api'
+    document.head.appendChild(tag)
+    ;(window as any).onYouTubeIframeAPIReady = () => setPlayerReady(true)
+  }, [])
+
+  // YouTube Player 初期化（videoとplayerReadyが揃ったら1回だけ）
+  useEffect(() => {
+    if (!video) return
+    // アップロード動画はスキップ
+    if (!video.youtube_url || video.video_url) return
+    const youtubeId = extractYouTubeId(video.youtube_url)
+    if (!youtubeId) return
+    if (!playerReady) return
+    if (playerInitializedRef.current) return
+    playerInitializedRef.current = true
+
+    playerRef.current = new (window as any).YT.Player('yt-player', {
+      videoId: youtubeId,
+      playerVars: { rel: 0, modestbranding: 1 },
+      events: {
+        onStateChange: (event: any) => {
+          const p = playerRef.current
+          if (!p) return
+          const pos = p.getCurrentTime()
+          if (event.data === (window as any).YT.PlayerState.PLAYING) {
+            recordEvent('play', pos)
+            if (heartbeatRef.current) clearInterval(heartbeatRef.current)
+            heartbeatRef.current = setInterval(() => recordEvent('heartbeat', p.getCurrentTime()), 30000)
+            startSurveyCheck()
+          } else if (event.data === (window as any).YT.PlayerState.PAUSED) {
+            recordEvent('pause', pos)
+            if (heartbeatRef.current) clearInterval(heartbeatRef.current)
+          } else if (event.data === (window as any).YT.PlayerState.ENDED) {
+            recordEvent('ended', p.getDuration())
+            if (heartbeatRef.current) clearInterval(heartbeatRef.current)
+            if (surveyCheckRef.current) clearInterval(surveyCheckRef.current)
+            setCompleted(true)
+          }
+        },
+      },
+    })
 
     return () => {
       if (heartbeatRef.current) clearInterval(heartbeatRef.current)
       if (surveyCheckRef.current) clearInterval(surveyCheckRef.current)
       playerRef.current?.destroy()
+      playerInitializedRef.current = false
     }
-    // video.idのみ依存（answeredIds等の変更でプレーヤーが再生成されない）
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [video?.id])
+  }, [video?.id, playerReady, recordEvent, startSurveyCheck])
 
   if (loading) {
     return (
@@ -314,6 +320,8 @@ export function StudentViewer() {
 
   if (!student || !video) return null
 
+  const isUpload = !video.youtube_url && !!video.video_url
+
   return (
     <div className="min-h-screen bg-gray-50">
       <header className="bg-gradient-to-r from-[#0079B3] to-[#5CA7D1] text-white px-6 py-5">
@@ -325,7 +333,7 @@ export function StudentViewer() {
 
       <main className="max-w-4xl mx-auto px-6 py-8">
         <div className="relative rounded-xl overflow-hidden bg-black aspect-video shadow-lg">
-          {isUploadVideo ? (
+          {isUpload ? (
             <video ref={nativeVideoRef} src={video.video_url!} controls className="w-full h-full" />
           ) : (
             <div id="yt-player" className="w-full h-full" />
