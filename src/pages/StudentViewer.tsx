@@ -27,7 +27,7 @@ function SurveyOverlay({
             <button
               key={i}
               onClick={() => onAnswer(choice)}
-              className="px-3 py-2.5 border border-gray-200 rounded-lg hover:bg-[#0079B3] hover:text-white hover:border-[#0079B3] transition-colors text-sm font-medium text-left"
+              className="px-3 py-2.5 border border-gray-200 rounded-lg hover:bg-[#1B2A4A] hover:text-white hover:border-[#1B2A4A] transition-colors text-sm font-medium text-left"
             >
               {choice}
             </button>
@@ -291,7 +291,7 @@ export function StudentViewer() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center space-y-3 animate-pulse">
-          <div className="w-12 h-12 bg-[#0079B3]/20 rounded-full mx-auto" />
+          <div className="w-12 h-12 bg-[#1B2A4A]/20 rounded-full mx-auto" />
           <p className="text-gray-500">読み込み中...</p>
         </div>
       </div>
@@ -316,7 +316,7 @@ export function StudentViewer() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <header className="bg-gradient-to-r from-[#0079B3] to-[#5CA7D1] text-white px-6 py-5">
+      <header className="bg-gradient-to-r from-[#1B2A4A] to-[#2C3E6B] text-white px-6 py-5">
         <div className="max-w-4xl mx-auto flex items-center justify-between">
           <h1 className="text-lg font-bold">会社説明会</h1>
           <div className="text-sm">{student.name} 様</div>

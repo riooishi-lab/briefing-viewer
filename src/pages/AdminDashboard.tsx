@@ -103,41 +103,41 @@ function VideosTab({ companyId }: { companyId: string }) {
           <h3 className="font-bold text-gray-800">動画を追加</h3>
           <div className="flex gap-1 bg-gray-100 rounded-lg p-0.5">
             <button onClick={() => setAddMode('youtube')}
-              className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${addMode === 'youtube' ? 'bg-white shadow text-[#0079B3]' : 'text-gray-500'}`}>
+              className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${addMode === 'youtube' ? 'bg-white shadow text-[#1B2A4A]' : 'text-gray-500'}`}>
               YouTube URL
             </button>
             <button onClick={() => setAddMode('upload')}
-              className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${addMode === 'upload' ? 'bg-white shadow text-[#0079B3]' : 'text-gray-500'}`}>
+              className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${addMode === 'upload' ? 'bg-white shadow text-[#1B2A4A]' : 'text-gray-500'}`}>
               ファイルアップロード
             </button>
           </div>
         </div>
 
         <input placeholder="タイトル *" value={title} onChange={(e) => setTitle(e.target.value)}
-          className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0079B3]" />
+          className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1B2A4A]" />
 
         {addMode === 'youtube' ? (
           <>
             <input placeholder="YouTube URL *" value={url} onChange={(e) => setUrl(e.target.value)}
-              className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0079B3]" />
+              className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1B2A4A]" />
             <input placeholder="説明（任意）" value={desc} onChange={(e) => setDesc(e.target.value)}
-              className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0079B3]" />
+              className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1B2A4A]" />
             <button onClick={addYouTubeVideo} disabled={!title || !url}
-              className="px-4 py-2 bg-[#0079B3] text-white rounded-lg text-sm font-medium hover:bg-[#005a86] disabled:opacity-40 flex items-center gap-2">
+              className="px-4 py-2 bg-[#1B2A4A] text-white rounded-lg text-sm font-medium hover:bg-[#0F1D35] disabled:opacity-40 flex items-center gap-2">
               <Plus className="h-4 w-4" /> 追加
             </button>
           </>
         ) : (
           <>
             <input placeholder="説明（任意）" value={desc} onChange={(e) => setDesc(e.target.value)}
-              className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0079B3]" />
+              className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1B2A4A]" />
             <div>
               <input ref={fileRef} type="file" accept="video/*" onChange={handleFileSelect}
                 className="text-sm file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-gray-100 file:text-gray-700 file:text-sm file:cursor-pointer" />
               {selectedFile && <p className="text-xs text-green-600 mt-1">{selectedFile.name} ({(selectedFile.size / 1024 / 1024).toFixed(1)} MB)</p>}
             </div>
             <button onClick={uploadVideo} disabled={!title || !selectedFile || uploading}
-              className="px-4 py-2 bg-[#0079B3] text-white rounded-lg text-sm font-medium hover:bg-[#005a86] disabled:opacity-40 flex items-center gap-2">
+              className="px-4 py-2 bg-[#1B2A4A] text-white rounded-lg text-sm font-medium hover:bg-[#0F1D35] disabled:opacity-40 flex items-center gap-2">
               {uploading ? <><Loader2 className="h-4 w-4 animate-spin" /> アップロード中...</> : <><Upload className="h-4 w-4" /> アップロード</>}
             </button>
             <p className="text-xs text-gray-400">対応形式: MP4, WebM, MOV（500MB以下）</p>
@@ -304,7 +304,7 @@ function StudentsTab({ companyId }: { companyId: string }) {
         <div className="flex items-center justify-between">
           <h3 className="font-bold text-gray-800">学生を追加</h3>
           <button onClick={() => setCsvMode(!csvMode)}
-            className="text-sm text-[#0079B3] hover:underline flex items-center gap-1">
+            className="text-sm text-[#1B2A4A] hover:underline flex items-center gap-1">
             <Upload className="h-3.5 w-3.5" /> {csvMode ? '個別追加に切替' : 'CSVで一括追加'}
           </button>
         </div>
@@ -313,7 +313,7 @@ function StudentsTab({ companyId }: { companyId: string }) {
           <div className="space-y-3">
             <div className="flex items-center gap-3">
               <input ref={fileRef} type="file" accept=".csv" onChange={handleCsvUpload}
-                className="text-sm file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-[#0079B3] file:text-white file:text-sm file:cursor-pointer" />
+                className="text-sm file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-[#1B2A4A] file:text-white file:text-sm file:cursor-pointer" />
               <button onClick={downloadSample} className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1">
                 <Download className="h-3 w-3" /> サンプルCSV
               </button>
@@ -324,12 +324,12 @@ function StudentsTab({ companyId }: { companyId: string }) {
           <>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <input placeholder="氏名 *" value={name} onChange={(e) => setName(e.target.value)}
-                className="px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0079B3]" />
+                className="px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1B2A4A]" />
               <input placeholder="メールアドレス *" value={email} onChange={(e) => setEmail(e.target.value)}
-                className="px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0079B3]" />
+                className="px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1B2A4A]" />
             </div>
             <button onClick={addStudent} disabled={!name || !email}
-              className="px-4 py-2 bg-[#0079B3] text-white rounded-lg text-sm font-medium hover:bg-[#005a86] disabled:opacity-40 flex items-center gap-2">
+              className="px-4 py-2 bg-[#1B2A4A] text-white rounded-lg text-sm font-medium hover:bg-[#0F1D35] disabled:opacity-40 flex items-center gap-2">
               <Plus className="h-4 w-4" /> 追加
             </button>
           </>
@@ -373,7 +373,7 @@ function StudentsTab({ companyId }: { companyId: string }) {
                   </td>
                   <td className="px-4 py-3 text-gray-500">{new Date(s.token_expires_at).toLocaleDateString('ja-JP')}</td>
                   <td className="px-4 py-3">
-                    <button onClick={() => copyUrl(s.token)} className="text-[#0079B3] hover:underline flex items-center gap-1 text-xs">
+                    <button onClick={() => copyUrl(s.token)} className="text-[#1B2A4A] hover:underline flex items-center gap-1 text-xs">
                       <Link className="h-3 w-3" /><Copy className="h-3 w-3" /> コピー
                     </button>
                   </td>
@@ -455,7 +455,7 @@ function SurveysTab({ companyId }: { companyId: string }) {
       <div className="flex gap-2 flex-wrap">
         {videos.map((v) => (
           <button key={v.id} onClick={() => setSelectedVideoId(v.id)}
-            className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${selectedVideoId === v.id ? 'bg-[#0079B3] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+            className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${selectedVideoId === v.id ? 'bg-[#1B2A4A] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
             {v.title}
           </button>
         ))}
@@ -475,7 +475,7 @@ function SurveysTab({ companyId }: { companyId: string }) {
               <div className="md:col-span-3">
                 <label className="text-xs text-gray-500">質問文</label>
                 <input placeholder="例: この説明で最も興味を持ったポイントは？" value={qText} onChange={(e) => setQText(e.target.value)}
-                  className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0079B3]" />
+                  className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1B2A4A]" />
               </div>
             </div>
             <div>
@@ -484,12 +484,12 @@ function SurveysTab({ companyId }: { companyId: string }) {
                 {choices.map((c, i) => (
                   <input key={i} placeholder={`選択肢${i + 1}`} value={c}
                     onChange={(e) => setChoices((prev) => prev.map((p, j) => j === i ? e.target.value : p))}
-                    className="px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0079B3]" />
+                    className="px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1B2A4A]" />
                 ))}
               </div>
             </div>
             <button onClick={addQuestion} disabled={!qText}
-              className="px-4 py-2 bg-[#0079B3] text-white rounded-lg text-sm font-medium hover:bg-[#005a86] disabled:opacity-40 flex items-center gap-2">
+              className="px-4 py-2 bg-[#1B2A4A] text-white rounded-lg text-sm font-medium hover:bg-[#0F1D35] disabled:opacity-40 flex items-center gap-2">
               <Plus className="h-4 w-4" /> 追加
             </button>
           </div>
@@ -513,7 +513,7 @@ function SurveysTab({ companyId }: { companyId: string }) {
                   <div key={q.id} className="bg-white rounded-xl border p-5 space-y-3">
                     <div className="flex items-start justify-between">
                       <div>
-                        <span className="text-xs bg-[#0079B3]/10 text-[#0079B3] px-2 py-0.5 rounded-full font-medium">
+                        <span className="text-xs bg-[#1B2A4A]/10 text-[#1B2A4A] px-2 py-0.5 rounded-full font-medium">
                           {Math.floor(q.trigger_sec / 60)}:{String(q.trigger_sec % 60).padStart(2, '0')} 後に表示
                         </span>
                         <p className="font-bold text-gray-800 mt-2">{q.question_text}</p>
@@ -530,7 +530,7 @@ function SurveysTab({ companyId }: { companyId: string }) {
                           <div key={choice} className="flex items-center gap-3">
                             <span className="text-sm text-gray-700 w-40 truncate">{choice}</span>
                             <div className="flex-1 h-6 bg-gray-100 rounded-full overflow-hidden">
-                              <div className="h-full bg-[#0079B3]/70 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                              <div className="h-full bg-[#1B2A4A]/70 rounded-full transition-all" style={{ width: `${pct}%` }} />
                             </div>
                             <span className="text-xs text-gray-500 w-16 text-right">{count}票 ({pct.toFixed(0)}%)</span>
                           </div>
@@ -687,9 +687,9 @@ export function AdminDashboard() {
       <header className="bg-white border-b sticky top-0 z-10">
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <Video className="h-6 w-6 text-[#0079B3]" />
+            <Video className="h-6 w-6 text-[#1B2A4A]" />
             <div>
-              <h1 className="font-bold text-[#0079B3] text-lg">説明会動画配信</h1>
+              <h1 className="font-bold text-[#1B2A4A] text-lg">説明会動画配信</h1>
               <p className="text-xs text-gray-400">{companyName}</p>
             </div>
           </div>
@@ -707,7 +707,7 @@ export function AdminDashboard() {
         <div className="flex gap-1 border-b">
           {tabs.map((t) => (
             <button key={t.key} onClick={() => setTab(t.key)}
-              className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${tab === t.key ? 'border-[#0079B3] text-[#0079B3]' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+              className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${tab === t.key ? 'border-[#1B2A4A] text-[#1B2A4A]' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
               {t.icon} {t.label}
             </button>
           ))}
