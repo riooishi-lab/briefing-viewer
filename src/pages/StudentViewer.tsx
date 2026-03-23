@@ -10,7 +10,7 @@ const extractYouTubeId = (url: string): string | null => {
   return m ? m[1] : null
 }
 
-// ─── アンケートオーバーレイ ───
+// ─── アンケートオーバーレイ（画面下部1/3、動画再生は継続）───
 function SurveyOverlay({
   question,
   onAnswer,
@@ -21,15 +21,15 @@ function SurveyOverlay({
   const choices = (question.choices as string[]) || []
 
   return (
-    <div className="absolute inset-0 bg-black/70 flex items-center justify-center z-10 animate-in fade-in">
-      <div className="bg-white rounded-xl p-6 max-w-lg w-full mx-4 shadow-2xl">
-        <p className="text-lg font-bold text-gray-800 mb-4">{question.question_text}</p>
-        <div className="space-y-2">
+    <div className="absolute bottom-0 left-0 right-0 h-1/3 bg-black/80 backdrop-blur-sm flex items-center justify-center z-10">
+      <div className="bg-white rounded-t-xl p-5 w-full h-full flex flex-col justify-center max-w-2xl mx-auto">
+        <p className="text-base font-bold text-gray-800 mb-3 text-center">{question.question_text}</p>
+        <div className="grid grid-cols-2 gap-2">
           {choices.map((choice, i) => (
             <button
               key={i}
               onClick={() => onAnswer(choice)}
-              className="w-full text-left px-4 py-3 border border-gray-200 rounded-lg hover:bg-[#0079B3] hover:text-white hover:border-[#0079B3] transition-colors text-sm font-medium"
+              className="px-3 py-2.5 border border-gray-200 rounded-lg hover:bg-[#0079B3] hover:text-white hover:border-[#0079B3] transition-colors text-sm font-medium text-left"
             >
               {choice}
             </button>
@@ -54,7 +54,9 @@ export function StudentViewer() {
   const playerRef = useRef<any>(null)
   const sessionIdRef = useRef<string>(uuidv4())
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const lastCheckRef = useRef<number>(0)
+  const surveyCheckRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  // シークで飛ばされた設問を検出するため、前回チェック位置を記録
+  const prevCheckPosRef = useRef<number>(0)
 
   const companyId = student?.company_id || ''
 
@@ -72,22 +74,32 @@ export function StudentViewer() {
   }, [student, video, companyId])
 
   // アンケートトリガーチェック
+  // シークで飛ばした場合も、prevPos〜currentPos間の未回答設問を検出
   const checkSurveyTrigger = useCallback((currentTime: number) => {
-    if (activeQuestion) return
+    if (activeQuestion) return // 既に表示中
+
     const sec = Math.floor(currentTime)
-    if (sec === lastCheckRef.current) return
-    lastCheckRef.current = sec
+    const prevSec = prevCheckPosRef.current
+    prevCheckPosRef.current = sec
 
     for (const q of questions) {
-      if (!answeredIds.has(q.id) && sec >= q.trigger_sec && sec < q.trigger_sec + 2) {
+      if (answeredIds.has(q.id)) continue
+
+      // 通常再生: trigger_secを通過した
+      // シーク: prevSecからsecの間にtrigger_secがある、またはシーク先がtrigger_sec以降
+      const triggered =
+        (sec >= q.trigger_sec && prevSec < q.trigger_sec) || // 通常通過
+        (sec >= q.trigger_sec && Math.abs(sec - prevSec) > 3) // シークで飛ばした
+
+      if (triggered) {
         setActiveQuestion(q)
-        playerRef.current?.pauseVideo()
+        // ④ 動画は一時停止しない（再生継続）
         break
       }
     }
   }, [questions, answeredIds, activeQuestion])
 
-  // アンケート回答 → 回答時点から再生を再開
+  // アンケート回答 → 動画はそのまま再生継続
   const handleAnswer = async (choice: string) => {
     if (!activeQuestion || !student || !video) return
     await supabase.from('survey_responses').insert({
@@ -100,13 +112,7 @@ export function StudentViewer() {
     })
     setAnsweredIds((prev) => new Set([...prev, activeQuestion.id]))
     setActiveQuestion(null)
-    const player = playerRef.current
-    if (player) {
-      // 一時停止した位置（= アンケート表示位置）から再生を再開
-      const currentPos = player.getCurrentTime()
-      player.seekTo(currentPos, true)
-      player.playVideo()
-    }
+    // ③ 動画は再生中のまま → 回答後もそのまま続きが見れる
   }
 
   // 初期化
@@ -139,7 +145,6 @@ export function StudentViewer() {
 
       setStudent(studentData)
 
-      // 公開中の動画を取得（最新1件）
       const { data: videoData } = await supabase
         .from('briefing_videos')
         .select('*')
@@ -157,7 +162,6 @@ export function StudentViewer() {
 
       setVideo(videoData)
 
-      // アンケート設問を取得
       const { data: qData } = await supabase
         .from('survey_questions')
         .select('*')
@@ -166,7 +170,6 @@ export function StudentViewer() {
 
       setQuestions(qData || [])
 
-      // 既に回答済みの設問を取得
       const { data: rData } = await supabase
         .from('survey_responses')
         .select('question_id')
@@ -180,10 +183,65 @@ export function StudentViewer() {
     init()
   }, [])
 
+  const isUploadVideo = !video?.youtube_url && !!video?.video_url
+  const nativeVideoRef = useRef<HTMLVideoElement>(null)
+
+  // アンケートチェック用の共通ループ開始
+  const startSurveyCheck = useCallback(() => {
+    if (surveyCheckRef.current) clearInterval(surveyCheckRef.current)
+    surveyCheckRef.current = setInterval(() => {
+      let currentTime = 0
+      if (isUploadVideo && nativeVideoRef.current) {
+        if (!nativeVideoRef.current.paused) currentTime = nativeVideoRef.current.currentTime
+        else return
+      } else if (playerRef.current) {
+        const state = playerRef.current.getPlayerState()
+        if (state === (window as any).YT?.PlayerState?.PLAYING) currentTime = playerRef.current.getCurrentTime()
+        else return
+      } else return
+      checkSurveyTrigger(currentTime)
+    }, 1000)
+  }, [isUploadVideo, checkSurveyTrigger])
+
+  // ネイティブ動画（アップロード）のイベントハンドラ
+  useEffect(() => {
+    if (!video || !isUploadVideo) return
+    const el = nativeVideoRef.current
+    if (!el) return
+
+    const onPlay = () => {
+      recordEvent('play', el.currentTime)
+      if (heartbeatRef.current) clearInterval(heartbeatRef.current)
+      heartbeatRef.current = setInterval(() => recordEvent('heartbeat', el.currentTime), 30000)
+      startSurveyCheck()
+    }
+    const onPause = () => {
+      recordEvent('pause', el.currentTime)
+      if (heartbeatRef.current) clearInterval(heartbeatRef.current)
+    }
+    const onEnded = () => {
+      recordEvent('ended', el.duration)
+      if (heartbeatRef.current) clearInterval(heartbeatRef.current)
+      if (surveyCheckRef.current) clearInterval(surveyCheckRef.current)
+      setCompleted(true)
+    }
+
+    el.addEventListener('play', onPlay)
+    el.addEventListener('pause', onPause)
+    el.addEventListener('ended', onEnded)
+    return () => {
+      el.removeEventListener('play', onPlay)
+      el.removeEventListener('pause', onPause)
+      el.removeEventListener('ended', onEnded)
+      if (heartbeatRef.current) clearInterval(heartbeatRef.current)
+      if (surveyCheckRef.current) clearInterval(surveyCheckRef.current)
+    }
+  }, [video, isUploadVideo, recordEvent, startSurveyCheck])
+
   // YouTube Player 初期化
   useEffect(() => {
-    if (!video) return
-    const youtubeId = extractYouTubeId(video.youtube_url)
+    if (!video || isUploadVideo) return
+    const youtubeId = video.youtube_url ? extractYouTubeId(video.youtube_url) : null
     if (!youtubeId) return
 
     const initPlayer = () => {
@@ -198,25 +256,15 @@ export function StudentViewer() {
             if (event.data === (window as any).YT.PlayerState.PLAYING) {
               recordEvent('play', pos)
               if (heartbeatRef.current) clearInterval(heartbeatRef.current)
-              heartbeatRef.current = setInterval(() => {
-                const t = p.getCurrentTime()
-                recordEvent('heartbeat', t)
-                checkSurveyTrigger(t)
-              }, 30000)
-              // 高頻度のアンケートチェック（1秒ごと）
-              const surveyCheck = setInterval(() => {
-                if (p.getPlayerState() === (window as any).YT.PlayerState.PLAYING) {
-                  checkSurveyTrigger(p.getCurrentTime())
-                } else {
-                  clearInterval(surveyCheck)
-                }
-              }, 1000)
+              heartbeatRef.current = setInterval(() => recordEvent('heartbeat', p.getCurrentTime()), 30000)
+              startSurveyCheck()
             } else if (event.data === (window as any).YT.PlayerState.PAUSED) {
               recordEvent('pause', pos)
               if (heartbeatRef.current) clearInterval(heartbeatRef.current)
             } else if (event.data === (window as any).YT.PlayerState.ENDED) {
               recordEvent('ended', p.getDuration())
               if (heartbeatRef.current) clearInterval(heartbeatRef.current)
+              if (surveyCheckRef.current) clearInterval(surveyCheckRef.current)
               setCompleted(true)
             }
           },
@@ -235,11 +283,11 @@ export function StudentViewer() {
 
     return () => {
       if (heartbeatRef.current) clearInterval(heartbeatRef.current)
+      if (surveyCheckRef.current) clearInterval(surveyCheckRef.current)
       playerRef.current?.destroy()
     }
-  }, [video, recordEvent, checkSurveyTrigger])
+  }, [video, isUploadVideo, recordEvent, startSurveyCheck])
 
-  // ─── ローディング ───
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -251,7 +299,6 @@ export function StudentViewer() {
     )
   }
 
-  // ─── エラー ───
   if (error) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -268,7 +315,6 @@ export function StudentViewer() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* ヘッダー */}
       <header className="bg-gradient-to-r from-[#0079B3] to-[#5CA7D1] text-white px-6 py-5">
         <div className="max-w-4xl mx-auto flex items-center justify-between">
           <h1 className="text-lg font-bold">会社説明会</h1>
@@ -277,21 +323,22 @@ export function StudentViewer() {
       </header>
 
       <main className="max-w-4xl mx-auto px-6 py-8">
-        {/* 動画プレーヤー */}
         <div className="relative rounded-xl overflow-hidden bg-black aspect-video shadow-lg">
-          <div id="yt-player" className="w-full h-full" />
+          {isUploadVideo ? (
+            <video ref={nativeVideoRef} src={video.video_url!} controls className="w-full h-full" />
+          ) : (
+            <div id="yt-player" className="w-full h-full" />
+          )}
           {activeQuestion && (
             <SurveyOverlay question={activeQuestion} onAnswer={handleAnswer} />
           )}
         </div>
 
-        {/* 動画情報 */}
         <div className="mt-6 space-y-2">
           <h2 className="text-2xl font-bold text-gray-800">{video.title}</h2>
           {video.description && <p className="text-gray-600">{video.description}</p>}
         </div>
 
-        {/* 視聴完了メッセージ */}
         {completed && (
           <div className="mt-8 bg-green-50 border border-green-200 rounded-xl p-6 text-center">
             <CheckCircle2 className="h-10 w-10 text-green-500 mx-auto mb-3" />

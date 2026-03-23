@@ -44,7 +44,8 @@ export interface BriefingVideo {
   id: string
   title: string
   description: string | null
-  youtube_url: string
+  youtube_url: string | null
+  video_url: string | null
   duration_sec: number | null
   is_published: boolean
   company_id: string
