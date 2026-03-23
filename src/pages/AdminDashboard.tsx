@@ -47,17 +47,23 @@ function VideosTab({ companyId }: { companyId: string }) {
     fetchVideos()
   }
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
-    if (!file || !title) return
+    if (!file) return
     if (!file.type.startsWith('video/')) { toast.error('動画ファイルを選択してください'); return }
     if (file.size > 500 * 1024 * 1024) { toast.error('ファイルサイズは500MB以下にしてください'); return }
+    setSelectedFile(file)
+  }
 
+  const uploadVideo = async () => {
+    if (!selectedFile || !title) return
     setUploading(true)
-    const ext = file.name.split('.').pop() || 'mp4'
+    const ext = selectedFile.name.split('.').pop() || 'mp4'
     const path = `${companyId}/${crypto.randomUUID()}.${ext}`
 
-    const { error: uploadError } = await supabase.storage.from('videos').upload(path, file, { contentType: file.type })
+    const { error: uploadError } = await supabase.storage.from('videos').upload(path, selectedFile, { contentType: selectedFile.type })
     if (uploadError) {
       toast.error(`アップロード失敗: ${uploadError.message}`)
       setUploading(false)
@@ -65,14 +71,13 @@ function VideosTab({ companyId }: { companyId: string }) {
     }
 
     const { data: urlData } = supabase.storage.from('videos').getPublicUrl(path)
-    const publicUrl = urlData.publicUrl
 
     const { error: dbError } = await supabase.from('briefing_videos').insert({
-      title, description: desc || null, video_url: publicUrl, company_id: companyId,
+      title, description: desc || null, video_url: urlData.publicUrl, company_id: companyId,
     })
     if (dbError) { toast.error('DB登録に失敗しました'); setUploading(false); return }
 
-    setTitle(''); setDesc('')
+    setTitle(''); setDesc(''); setSelectedFile(null)
     if (fileRef.current) fileRef.current.value = ''
     setUploading(false)
     toast.success('動画をアップロードしました')
@@ -126,11 +131,15 @@ function VideosTab({ companyId }: { companyId: string }) {
           <>
             <input placeholder="説明（任意）" value={desc} onChange={(e) => setDesc(e.target.value)}
               className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0079B3]" />
-            <div className="flex items-center gap-3">
-              <input ref={fileRef} type="file" accept="video/*" onChange={handleFileUpload} disabled={!title || uploading}
-                className="text-sm file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-[#0079B3] file:text-white file:text-sm file:cursor-pointer disabled:opacity-40" />
-              {uploading && <span className="flex items-center gap-1 text-sm text-[#0079B3]"><Loader2 className="h-4 w-4 animate-spin" /> アップロード中...</span>}
+            <div>
+              <input ref={fileRef} type="file" accept="video/*" onChange={handleFileSelect}
+                className="text-sm file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-gray-100 file:text-gray-700 file:text-sm file:cursor-pointer" />
+              {selectedFile && <p className="text-xs text-green-600 mt-1">{selectedFile.name} ({(selectedFile.size / 1024 / 1024).toFixed(1)} MB)</p>}
             </div>
+            <button onClick={uploadVideo} disabled={!title || !selectedFile || uploading}
+              className="px-4 py-2 bg-[#0079B3] text-white rounded-lg text-sm font-medium hover:bg-[#005a86] disabled:opacity-40 flex items-center gap-2">
+              {uploading ? <><Loader2 className="h-4 w-4 animate-spin" /> アップロード中...</> : <><Upload className="h-4 w-4" /> アップロード</>}
+            </button>
             <p className="text-xs text-gray-400">対応形式: MP4, WebM, MOV（500MB以下）</p>
           </>
         )}
