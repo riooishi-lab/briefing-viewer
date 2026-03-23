@@ -207,13 +207,13 @@ function StudentsTab({ companyId }: { companyId: string }) {
     const { data } = await supabase.from('students').select('*').eq('company_id', companyId).order('created_at', { ascending: false })
     const studentList = data || []
 
-    // 説明会動画の視聴有無を取得（endedイベントがあれば視聴済み）
-    const { data: endedEvents } = await supabase
+    // 説明会動画の視聴有無を取得（playイベントが1つでもあれば視聴済み）
+    const { data: playEvents } = await supabase
       .from('watch_events')
       .select('student_id')
       .eq('company_id', companyId)
-      .eq('event_type', 'ended')
-    const watchedSet = new Set((endedEvents || []).map((e: { student_id: string }) => e.student_id))
+      .in('event_type', ['play', 'heartbeat', 'ended'])
+    const watchedSet = new Set((playEvents || []).map((e: { student_id: string }) => e.student_id))
 
     setStudents(studentList.map((s: Student) => ({ ...s, watched: watchedSet.has(s.id) })))
     setLoading(false)
