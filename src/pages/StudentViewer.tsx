@@ -216,34 +216,33 @@ export function StudentViewer() {
 
     const createPlayer = () => {
       if (destroyed) return
-      // yt-player divが存在するか確認
+      if (playerRef.current) return // 既に生成済み
       const container = document.getElementById('yt-player')
       if (!container) return
 
+      console.log('[YT] Creating player for:', youtubeId)
       playerRef.current = new (window as any).YT.Player('yt-player', {
         videoId: youtubeId,
         width: '100%',
         height: '100%',
         playerVars: { rel: 0, modestbranding: 1, playsinline: 1 },
         events: {
-          onReady: () => {
-            console.log('[YT] Player ready')
-          },
+          onReady: () => console.log('[YT] Player ready'),
           onStateChange: (event: any) => {
             const p = playerRef.current
             if (!p?.getCurrentTime) return
             const pos = p.getCurrentTime()
-            if (event.data === 1) { // PLAYING
+            if (event.data === 1) {
               recordEvent('play', pos)
               if (heartbeatRef.current) clearInterval(heartbeatRef.current)
               heartbeatRef.current = setInterval(() => {
                 if (playerRef.current?.getCurrentTime) recordEvent('heartbeat', playerRef.current.getCurrentTime())
               }, 30000)
               startSurveyCheck()
-            } else if (event.data === 2) { // PAUSED
+            } else if (event.data === 2) {
               recordEvent('pause', pos)
               if (heartbeatRef.current) clearInterval(heartbeatRef.current)
-            } else if (event.data === 0) { // ENDED
+            } else if (event.data === 0) {
               recordEvent('ended', p.getDuration ? p.getDuration() : pos)
               if (heartbeatRef.current) clearInterval(heartbeatRef.current)
               if (surveyCheckRef.current) clearInterval(surveyCheckRef.current)
@@ -254,27 +253,22 @@ export function StudentViewer() {
       })
     }
 
-    // YouTube IFrame API がロード済みか確認
-    if ((window as any).YT?.Player) {
-      createPlayer()
-    } else {
-      // スクリプトが既に挿入されているか確認
-      const existing = document.querySelector('script[src*="youtube.com/iframe_api"]')
-      if (!existing) {
-        const tag = document.createElement('script')
-        tag.src = 'https://www.youtube.com/iframe_api'
-        document.head.appendChild(tag)
-      }
-      // onYouTubeIframeAPIReady は1回しか呼ばれないので、ポーリングで待機
-      const waitForYT = setInterval(() => {
-        if ((window as any).YT?.Player) {
-          clearInterval(waitForYT)
-          createPlayer()
-        }
-      }, 100)
-      // 10秒でタイムアウト
-      setTimeout(() => clearInterval(waitForYT), 10000)
+    // IFrame APIスクリプトを挿入
+    if (!document.querySelector('script[src*="youtube.com/iframe_api"]')) {
+      const tag = document.createElement('script')
+      tag.src = 'https://www.youtube.com/iframe_api'
+      document.head.appendChild(tag)
     }
+
+    // YT API + DOM の両方が揃うまでポーリング（200ms間隔、最大15秒）
+    const poll = setInterval(() => {
+      if (destroyed) { clearInterval(poll); return }
+      if ((window as any).YT?.Player && document.getElementById('yt-player')) {
+        clearInterval(poll)
+        createPlayer()
+      }
+    }, 200)
+    setTimeout(() => clearInterval(poll), 15000)
 
     return () => {
       destroyed = true
