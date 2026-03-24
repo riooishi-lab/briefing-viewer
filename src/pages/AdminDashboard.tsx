@@ -651,11 +651,165 @@ function HourlyChart({ hourlyCounts }: { hourlyCounts: number[] }) {
   )
 }
 
+// ─── 端末別円グラフ ───
+function DevicePieChart({ sessions }: { sessions: { device_type: string }[] }) {
+  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null)
+
+  const devices = [
+    { key: 'PC',    label: 'PC',    color: '#1B2A4A' },
+    { key: 'スマホ', label: 'スマホ', color: '#3b82f6' },
+    { key: 'iPad',  label: 'iPad',  color: '#93c5fd' },
+  ]
+  const counts = devices.map(d => sessions.filter(s => s.device_type === d.key).length)
+  const total = counts.reduce((a, b) => a + b, 0)
+
+  const cx = 80, cy = 80, r = 65, ir = 38
+  const toXY = (angleDeg: number, radius: number) => {
+    const rad = (angleDeg - 90) * Math.PI / 180
+    return { x: cx + radius * Math.cos(rad), y: cy + radius * Math.sin(rad) }
+  }
+  const slicePath = (start: number, end: number) => {
+    if (end - start >= 360) end = 359.999
+    const s1 = toXY(start, r), e1 = toXY(end, r)
+    const s2 = toXY(start, ir), e2 = toXY(end, ir)
+    const lg = end - start > 180 ? 1 : 0
+    return `M ${s1.x} ${s1.y} A ${r} ${r} 0 ${lg} 1 ${e1.x} ${e1.y} L ${e2.x} ${e2.y} A ${ir} ${ir} 0 ${lg} 0 ${s2.x} ${s2.y} Z`
+  }
+
+  let angle = 0
+  const slices = counts.map((count, i) => {
+    const deg = total > 0 ? (count / total) * 360 : 0
+    const start = angle; angle += deg
+    return { ...devices[i], count, pct: total > 0 ? Math.round(count / total * 100) : 0, start, end: angle }
+  })
+
+  return (
+    <div className="bg-white rounded-xl border p-6">
+      <h3 className="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
+        <Monitor className="h-4 w-4 text-[#1B2A4A]" />
+        端末別 視聴割合
+      </h3>
+      <div className="flex items-center gap-6">
+        <svg viewBox="0 0 160 160" style={{ width: 140, height: 140, flexShrink: 0 }}>
+          {total === 0 ? (
+            <circle cx={cx} cy={cy} r={r} fill="#f3f4f6" />
+          ) : slices.map((s, i) => s.count > 0 && (
+            <path key={s.key} d={slicePath(s.start, s.end)} fill={s.color}
+              opacity={hoveredIdx === null || hoveredIdx === i ? 1 : 0.4}
+              style={{ transition: 'opacity 0.15s' }}
+              onMouseEnter={() => setHoveredIdx(i)} onMouseLeave={() => setHoveredIdx(null)}
+              className="cursor-default" />
+          ))}
+          <text x={cx} y={cy - 6} textAnchor="middle" fontSize={22} fontWeight="bold" fill="#1B2A4A">{total}</text>
+          <text x={cx} y={cy + 11} textAnchor="middle" fontSize={10} fill="#9ca3af">セッション</text>
+        </svg>
+        <div className="space-y-3 flex-1">
+          {slices.map((s, i) => (
+            <div key={s.key}
+              className={`flex items-center gap-2 text-sm transition-opacity ${hoveredIdx !== null && hoveredIdx !== i ? 'opacity-30' : ''}`}
+              onMouseEnter={() => setHoveredIdx(i)} onMouseLeave={() => setHoveredIdx(null)}
+            >
+              <span className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: s.color }} />
+              <span className="text-gray-600 flex-1">{s.label}</span>
+              <span className="font-semibold text-gray-800">{s.count}</span>
+              <span className="text-gray-400 text-xs w-9 text-right">{s.pct}%</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── 視聴時間分布グラフ ───
+function WatchDurationChart({ watchSecs, videoDuration }: { watchSecs: number[]; videoDuration: number }) {
+  const [hoveredBin, setHoveredBin] = useState<number | null>(null)
+  const BINS = 10
+
+  const maxDur = videoDuration > 0 ? videoDuration : Math.max(...watchSecs, 60)
+  const binSize = maxDur / BINS
+  const binCounts = Array(BINS).fill(0)
+  watchSecs.forEach(sec => { if (sec > 0) binCounts[Math.min(Math.floor(sec / binSize), BINS - 1)]++ })
+
+  const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`
+  const maxCount = Math.max(...binCounts, 1)
+  const total = watchSecs.filter(s => s > 0).length
+
+  const BAR_W = 28, BAR_GAP = 6, CHART_H = 120
+  const PAD_L = 28, PAD_R = 8, PAD_T = 24, PAD_B = 36
+  const svgW = PAD_L + BINS * (BAR_W + BAR_GAP) - BAR_GAP + PAD_R
+  const svgH = PAD_T + CHART_H + PAD_B
+  const gridValues = [0, Math.ceil(maxCount / 2), maxCount]
+
+  return (
+    <div className="bg-white rounded-xl border p-6">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+          <Clock className="h-4 w-4 text-[#1B2A4A]" />
+          視聴時間 分布
+        </h3>
+        <span className="text-xs text-gray-400">{total} セッション</span>
+      </div>
+      <div className="overflow-x-auto">
+        <svg viewBox={`0 0 ${svgW} ${svgH}`} className="w-full" style={{ minWidth: 280 }}>
+          {gridValues.map(val => {
+            const y = PAD_T + CHART_H - (val / maxCount) * CHART_H
+            return (
+              <g key={val}>
+                <line x1={PAD_L} y1={y} x2={svgW - PAD_R} y2={y} stroke="#f3f4f6" strokeWidth={1} />
+                <text x={PAD_L - 4} y={y + 3.5} textAnchor="end" fontSize={9} fill="#d1d5db">{val}</text>
+              </g>
+            )
+          })}
+          <line x1={PAD_L} y1={PAD_T + CHART_H} x2={svgW - PAD_R} y2={PAD_T + CHART_H} stroke="#e5e7eb" strokeWidth={1} />
+
+          {binCounts.map((count, i) => {
+            const x = PAD_L + i * (BAR_W + BAR_GAP)
+            const barH = (count / maxCount) * CHART_H
+            const y = PAD_T + CHART_H - barH
+            const isPeak = count > 0 && count === Math.max(...binCounts)
+            const isHovered = hoveredBin === i
+            const tipW = 80
+            const tipX = Math.min(Math.max(x + BAR_W / 2 - tipW / 2, PAD_L), svgW - PAD_R - tipW)
+            return (
+              <g key={i}>
+                {count > 0 ? (
+                  <rect x={x} y={y} width={BAR_W} height={barH} rx={2.5}
+                    fill={isPeak ? '#1B2A4A' : isHovered ? '#3b82f6' : '#93c5fd'}
+                    style={{ transition: 'fill 0.15s' }}
+                    onMouseEnter={() => setHoveredBin(i)} onMouseLeave={() => setHoveredBin(null)}
+                    className="cursor-default" />
+                ) : (
+                  <rect x={x} y={PAD_T + CHART_H - 1} width={BAR_W} height={1} rx={1} fill="#f3f4f6" />
+                )}
+                <text x={x + BAR_W / 2} y={PAD_T + CHART_H + 14} textAnchor="middle" fontSize={8} fill="#9ca3af">
+                  {fmt((i + 1) * binSize)}
+                </text>
+                {isHovered && count > 0 && (
+                  <g>
+                    <rect x={tipX} y={y - 22} width={tipW} height={17} rx={3} fill="#111827" />
+                    <text x={tipX + tipW / 2} y={y - 10} textAnchor="middle" fontSize={9} fill="white">
+                      〜{fmt((i + 1) * binSize)}: {count}人
+                    </text>
+                  </g>
+                )}
+              </g>
+            )
+          })}
+        </svg>
+      </div>
+      {maxDur > 0 && (
+        <p className="text-xs text-gray-400 mt-1">動画尺 {fmt(maxDur)} を {BINS} 分割</p>
+      )}
+    </div>
+  )
+}
+
 // ─── 視聴ログ ───
 type SessionEntry = {
   student_name: string; student_email: string; video_title: string;
   first_at: number; last_at: number; ended: boolean; last_position: number;
-  device_type: string;
+  device_type: string; video_duration_sec: number;
 }
 
 type Preset = '今日' | '今週' | '今月' | '全期間' | 'カスタム'
@@ -687,7 +841,7 @@ function LogsTab({ companyId }: { companyId: string }) {
     const fetchLogs = async () => {
       const { data: events } = await supabase
         .from('watch_events')
-        .select('*, student:students(name, email), video:briefing_videos(title)')
+        .select('*, student:students(name, email), video:briefing_videos(title, duration_sec)')
         .eq('company_id', companyId)
         .order('created_at', { ascending: false })
 
@@ -704,6 +858,7 @@ function LogsTab({ companyId }: { companyId: string }) {
             video_title: e.video?.title || '不明',
             first_at: t, last_at: t, ended: false, last_position: e.position_sec || 0,
             device_type: e.device_type || '',
+            video_duration_sec: e.video?.duration_sec || 0,
           }
         }
         if (t < sessions[sid].first_at) {
@@ -739,6 +894,12 @@ function LogsTab({ companyId }: { companyId: string }) {
 
   const hourlyCounts = Array(24).fill(0)
   filtered.forEach((s) => { hourlyCounts[new Date(s.first_at).getHours()]++ })
+
+  const watchSecs = filtered.map(s => {
+    const timeDiff = Math.floor((s.last_at - s.first_at) / 1000)
+    return s.last_position > 0 ? Math.round(s.last_position) : timeDiff
+  })
+  const videoDuration = filtered.reduce((max, s) => Math.max(max, s.video_duration_sec), 0)
 
   const logs = filtered
     .map((s) => {
@@ -815,7 +976,13 @@ function LogsTab({ companyId }: { companyId: string }) {
 
       {/* 分析ビュー */}
       {view === 'analytics' && (
-        <HourlyChart hourlyCounts={hourlyCounts} />
+        <div className="space-y-5">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <DevicePieChart sessions={filtered} />
+            <WatchDurationChart watchSecs={watchSecs} videoDuration={videoDuration} />
+          </div>
+          <HourlyChart hourlyCounts={hourlyCounts} />
+        </div>
       )}
 
       {/* ログビュー */}
