@@ -551,48 +551,99 @@ function SurveysTab({ companyId }: { companyId: string }) {
 
 // ─── 時間帯別視聴グラフ ───
 function HourlyChart({ hourlyCounts }: { hourlyCounts: number[] }) {
+  const [hoveredHour, setHoveredHour] = useState<number | null>(null)
   const maxCount = Math.max(...hourlyCounts, 1)
   const total = hourlyCounts.reduce((a, b) => a + b, 0)
+  const peakHour = hourlyCounts.indexOf(Math.max(...hourlyCounts))
+
+  const BAR_W = 14
+  const BAR_GAP = 5
+  const CHART_H = 120
+  const PAD_L = 28
+  const PAD_R = 8
+  const PAD_T = 24
+  const PAD_B = 24
+  const svgW = PAD_L + 24 * (BAR_W + BAR_GAP) - BAR_GAP + PAD_R
+  const svgH = PAD_T + CHART_H + PAD_B
+
+  const gridValues = [0, Math.ceil(maxCount / 2), maxCount]
+
   return (
     <div className="bg-white rounded-xl border p-6">
-      <h3 className="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
-        <BarChart3 className="h-4 w-4 text-[#1B2A4A]" />
-        時間帯別 視聴集中度（全期間・{total}セッション）
-      </h3>
-      <div className="flex items-end gap-px" style={{ height: 120 }}>
-        {hourlyCounts.map((count, hour) => {
-          const heightPct = maxCount > 0 ? (count / maxCount) * 100 : 0
-          const isPeak = count === maxCount && count > 0
-          return (
-            <div key={hour} className="flex-1 flex flex-col items-center gap-0.5 group relative">
-              <div className="w-full flex flex-col justify-end" style={{ height: 100 }}>
-                <div
-                  className={`w-full rounded-t transition-all ${isPeak ? 'bg-[#1B2A4A]' : 'bg-blue-300 group-hover:bg-blue-400'}`}
-                  style={{ height: `${heightPct}%`, minHeight: count > 0 ? 2 : 0 }}
-                />
-              </div>
-              {count > 0 && (
-                <span className="absolute -top-5 left-1/2 -translate-x-1/2 bg-gray-800 text-white text-[10px] px-1 rounded opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-10">
-                  {hour}時: {count}回
-                </span>
-              )}
-              <span className="text-[9px] text-gray-400 leading-none">
-                {hour % 3 === 0 ? `${hour}` : ''}
-              </span>
-            </div>
-          )
-        })}
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+          <BarChart3 className="h-4 w-4 text-[#1B2A4A]" />
+          時間帯別 視聴集中度
+        </h3>
+        <span className="text-xs text-gray-400">{total} セッション</span>
       </div>
-      <div className="mt-2 flex justify-between text-[10px] text-gray-400">
-        <span>0時</span>
-        <span>6時</span>
-        <span>12時</span>
-        <span>18時</span>
-        <span>23時</span>
+
+      <div className="overflow-x-auto">
+        <svg viewBox={`0 0 ${svgW} ${svgH}`} className="w-full" style={{ minWidth: 360 }}>
+          {/* Grid lines */}
+          {gridValues.map((val) => {
+            const y = PAD_T + CHART_H - (val / maxCount) * CHART_H
+            return (
+              <g key={val}>
+                <line x1={PAD_L} y1={y} x2={svgW - PAD_R} y2={y} stroke="#f3f4f6" strokeWidth={1} />
+                <text x={PAD_L - 4} y={y + 3.5} textAnchor="end" fontSize={9} fill="#d1d5db">{val}</text>
+              </g>
+            )
+          })}
+
+          {/* Baseline */}
+          <line x1={PAD_L} y1={PAD_T + CHART_H} x2={svgW - PAD_R} y2={PAD_T + CHART_H} stroke="#e5e7eb" strokeWidth={1} />
+
+          {/* Bars */}
+          {hourlyCounts.map((count, hour) => {
+            const x = PAD_L + hour * (BAR_W + BAR_GAP)
+            const barH = (count / maxCount) * CHART_H
+            const y = PAD_T + CHART_H - barH
+            const isPeak = count > 0 && count === Math.max(...hourlyCounts)
+            const isHovered = hoveredHour === hour
+
+            // Tooltip x: clamp so it doesn't overflow
+            const tipW = 56
+            const tipX = Math.min(Math.max(x + BAR_W / 2 - tipW / 2, PAD_L), svgW - PAD_R - tipW)
+
+            return (
+              <g key={hour}>
+                {count > 0 ? (
+                  <rect
+                    x={x} y={y} width={BAR_W} height={barH} rx={2.5}
+                    fill={isPeak ? '#1B2A4A' : isHovered ? '#3b82f6' : '#93c5fd'}
+                    style={{ transition: 'fill 0.15s' }}
+                    onMouseEnter={() => setHoveredHour(hour)}
+                    onMouseLeave={() => setHoveredHour(null)}
+                    className="cursor-default"
+                  />
+                ) : (
+                  <rect x={x} y={PAD_T + CHART_H - 1} width={BAR_W} height={1} rx={1} fill="#f3f4f6" />
+                )}
+                {/* X-axis label every 3 hours */}
+                {hour % 3 === 0 && (
+                  <text x={x + BAR_W / 2} y={PAD_T + CHART_H + 14} textAnchor="middle" fontSize={9} fill="#9ca3af">
+                    {hour}時
+                  </text>
+                )}
+                {/* Tooltip */}
+                {isHovered && count > 0 && (
+                  <g>
+                    <rect x={tipX} y={y - 22} width={tipW} height={17} rx={3} fill="#111827" />
+                    <text x={tipX + tipW / 2} y={y - 10} textAnchor="middle" fontSize={10} fill="white">
+                      {hour}時: {count}回
+                    </text>
+                  </g>
+                )}
+              </g>
+            )
+          })}
+        </svg>
       </div>
+
       {total > 0 && (
-        <p className="mt-3 text-xs text-gray-500">
-          ピーク: {hourlyCounts.indexOf(maxCount)}時台（{maxCount}セッション）
+        <p className="text-xs text-gray-500">
+          ピーク: <span className="font-medium text-[#1B2A4A]">{peakHour}時台</span>（{Math.max(...hourlyCounts)}セッション）
         </p>
       )}
     </div>
@@ -600,10 +651,34 @@ function HourlyChart({ hourlyCounts }: { hourlyCounts: number[] }) {
 }
 
 // ─── 視聴ログ ───
+type SessionEntry = {
+  student_name: string; student_email: string; video_title: string;
+  first_at: number; last_at: number; ended: boolean; last_position: number;
+}
+
+type Preset = '今日' | '今週' | '今月' | '全期間' | 'カスタム'
+
+function getPresetRange(preset: Preset): { from: string; to: string } {
+  const now = new Date()
+  const toStr = now.toISOString().slice(0, 10)
+  if (preset === '今日') return { from: toStr, to: toStr }
+  if (preset === '今週') {
+    const d = new Date(now)
+    d.setDate(d.getDate() - ((d.getDay() + 6) % 7)) // Monday
+    return { from: d.toISOString().slice(0, 10), to: toStr }
+  }
+  if (preset === '今月') {
+    return { from: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`, to: toStr }
+  }
+  return { from: '', to: '' }
+}
+
 function LogsTab({ companyId }: { companyId: string }) {
-  const [logs, setLogs] = useState<{ student_name: string; student_email: string; video_title: string; played_at: string; watch_sec: number; completed: boolean }[]>([])
-  const [hourlyCounts, setHourlyCounts] = useState<number[]>(Array(24).fill(0))
+  const [allSessions, setAllSessions] = useState<SessionEntry[]>([])
   const [loading, setLoading] = useState(true)
+  const [preset, setPreset] = useState<Preset>('全期間')
+  const [customFrom, setCustomFrom] = useState('')
+  const [customTo, setCustomTo] = useState('')
 
   useEffect(() => {
     const fetchLogs = async () => {
@@ -615,11 +690,7 @@ function LogsTab({ companyId }: { companyId: string }) {
 
       if (!events) { setLoading(false); return }
 
-      // セッション別に集計（play〜最終イベントの時刻差分で実視聴時間を計算）
-      const sessions: Record<string, {
-        student_name: string; student_email: string; video_title: string;
-        first_at: number; last_at: number; ended: boolean; last_position: number;
-      }> = {}
+      const sessions: Record<string, SessionEntry> = {}
       events.forEach((e: any) => {
         const sid = e.session_id || e.id
         const t = new Date(e.created_at).getTime()
@@ -628,10 +699,7 @@ function LogsTab({ companyId }: { companyId: string }) {
             student_name: e.student?.name || '不明',
             student_email: e.student?.email || '',
             video_title: e.video?.title || '不明',
-            first_at: t,
-            last_at: t,
-            ended: false,
-            last_position: e.position_sec || 0,
+            first_at: t, last_at: t, ended: false, last_position: e.position_sec || 0,
           }
         }
         if (t < sessions[sid].first_at) sessions[sid].first_at = t
@@ -642,35 +710,42 @@ function LogsTab({ companyId }: { companyId: string }) {
         if (e.event_type === 'ended') sessions[sid].ended = true
       })
 
-      const result = Object.values(sessions)
-        .map((s) => {
-          // position_secが記録されていればそちらを優先、なければ時刻差分
-          const timeDiffSec = Math.floor((s.last_at - s.first_at) / 1000)
-          const watchSec = s.last_position > 0 ? Math.round(s.last_position) : timeDiffSec
-          return {
-            student_name: s.student_name,
-            student_email: s.student_email,
-            video_title: s.video_title,
-            played_at: new Date(s.first_at).toISOString(),
-            watch_sec: watchSec,
-            completed: s.ended,
-          }
-        })
-        .sort((a, b) => new Date(b.played_at).getTime() - new Date(a.played_at).getTime())
-
-      // 時間帯別カウント（セッション開始時刻の時間で集計）
-      const counts = Array(24).fill(0)
-      Object.values(sessions).forEach((s) => {
-        const hour = new Date(s.first_at).getHours()
-        counts[hour]++
-      })
-
-      setLogs(result)
-      setHourlyCounts(counts)
+      setAllSessions(Object.values(sessions))
       setLoading(false)
     }
     fetchLogs()
   }, [companyId])
+
+  // フィルター適用
+  const { from: presetFrom, to: presetTo } = getPresetRange(preset)
+  const fromStr = preset === 'カスタム' ? customFrom : presetFrom
+  const toStr   = preset === 'カスタム' ? customTo   : presetTo
+
+  const filtered = allSessions.filter((s) => {
+    const d = new Date(s.first_at)
+    const dStr = d.toISOString().slice(0, 10)
+    if (fromStr && dStr < fromStr) return false
+    if (toStr   && dStr > toStr)   return false
+    return true
+  })
+
+  const hourlyCounts = Array(24).fill(0)
+  filtered.forEach((s) => { hourlyCounts[new Date(s.first_at).getHours()]++ })
+
+  const logs = filtered
+    .map((s) => {
+      const timeDiffSec = Math.floor((s.last_at - s.first_at) / 1000)
+      const watchSec = s.last_position > 0 ? Math.round(s.last_position) : timeDiffSec
+      return {
+        student_name: s.student_name,
+        student_email: s.student_email,
+        video_title: s.video_title,
+        played_at: new Date(s.first_at).toISOString(),
+        watch_sec: watchSec,
+        completed: s.ended,
+      }
+    })
+    .sort((a, b) => new Date(b.played_at).getTime() - new Date(a.played_at).getTime())
 
   const formatTime = (sec: number) => {
     const m = Math.floor(sec / 60)
@@ -680,13 +755,49 @@ function LogsTab({ companyId }: { companyId: string }) {
 
   if (loading) return <p className="text-gray-400 text-center py-8">読み込み中...</p>
 
+  const presets: Preset[] = ['今日', '今週', '今月', '全期間', 'カスタム']
+
   return (
     <div className="space-y-6">
+      {/* フィルター */}
+      <div className="bg-white rounded-xl border p-4 flex flex-wrap items-center gap-3">
+        <span className="text-xs font-medium text-gray-500">期間</span>
+        <div className="flex gap-1.5 flex-wrap">
+          {presets.map((p) => (
+            <button
+              key={p}
+              onClick={() => setPreset(p)}
+              className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                preset === p
+                  ? 'bg-[#1B2A4A] text-white'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
+            >
+              {p}
+            </button>
+          ))}
+        </div>
+        {preset === 'カスタム' && (
+          <div className="flex items-center gap-2 text-xs">
+            <input
+              type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)}
+              className="border rounded px-2 py-1 text-xs text-gray-700"
+            />
+            <span className="text-gray-400">〜</span>
+            <input
+              type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)}
+              className="border rounded px-2 py-1 text-xs text-gray-700"
+            />
+          </div>
+        )}
+      </div>
+
       <HourlyChart hourlyCounts={hourlyCounts} />
+
       {logs.length === 0 ? (
         <div className="text-center py-12 text-gray-400">
           <Play className="h-10 w-10 mx-auto mb-2 opacity-40" />
-          <p>視聴ログがまだありません</p>
+          <p>該当する視聴ログがありません</p>
         </div>
       ) : (
         <div className="bg-white rounded-xl border overflow-hidden">
