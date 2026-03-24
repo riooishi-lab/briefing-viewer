@@ -74,14 +74,22 @@ export function StudentViewer() {
   studentRef.current = student
   videoRef.current = video
 
+  const deviceType = (() => {
+    const ua = navigator.userAgent
+    if (/iPad/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return 'iPad'
+    if (/iPhone|Android/.test(ua) || (/Mobile/.test(ua) && !/iPad/.test(ua))) return 'スマホ'
+    return 'PC'
+  })()
+
   const recordEvent = useCallback(async (eventType: string, positionSec: number) => {
     const s = studentRef.current, v = videoRef.current
     if (!s || !v) return
     await supabase.from('watch_events').insert({
       student_id: s.id, video_id: v.id, event_type: eventType,
       position_sec: positionSec, session_id: sessionIdRef.current, company_id: s.company_id,
+      device_type: deviceType,
     })
-  }, [])
+  }, [deviceType])
 
   const checkSurveyTrigger = useCallback((currentTime: number) => {
     if (activeQuestionRef.current) return
