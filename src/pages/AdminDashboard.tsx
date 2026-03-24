@@ -681,12 +681,13 @@ function LogsTab({ companyId }: { companyId: string }) {
   const [preset, setPreset] = useState<Preset>('全期間')
   const [customFrom, setCustomFrom] = useState('')
   const [customTo, setCustomTo] = useState('')
+  const [view, setView] = useState<'logs' | 'analytics'>('logs')
 
   useEffect(() => {
     const fetchLogs = async () => {
       const { data: events } = await supabase
         .from('watch_events')
-        .select('student_id, video_id, event_type, session_id, created_at, device_type, student:students(name, email), video:briefing_videos(title)')
+        .select('*, student:students(name, email), video:briefing_videos(title)')
         .eq('company_id', companyId)
         .order('created_at', { ascending: false })
 
@@ -766,18 +767,35 @@ function LogsTab({ companyId }: { companyId: string }) {
 
   return (
     <div className="space-y-6">
-      {/* フィルター */}
-      <div className="bg-white rounded-xl border p-4 flex flex-wrap items-center gap-3">
-        <span className="text-xs font-medium text-gray-500">期間</span>
+      {/* ビュー切り替え＋期間フィルター */}
+      <div className="bg-white rounded-xl border p-4 flex flex-wrap items-center gap-4">
+        {/* ログ / 分析 切り替え */}
+        <div className="flex rounded-lg border overflow-hidden shrink-0">
+          <button
+            onClick={() => setView('logs')}
+            className={`px-4 py-1.5 text-xs font-medium transition-colors ${view === 'logs' ? 'bg-[#1B2A4A] text-white' : 'text-gray-600 hover:bg-gray-50'}`}
+          >
+            ログ
+          </button>
+          <button
+            onClick={() => setView('analytics')}
+            className={`px-4 py-1.5 text-xs font-medium transition-colors ${view === 'analytics' ? 'bg-[#1B2A4A] text-white' : 'text-gray-600 hover:bg-gray-50'}`}
+          >
+            分析
+          </button>
+        </div>
+
+        <div className="w-px h-5 bg-gray-200 shrink-0" />
+
+        {/* 期間フィルター */}
+        <span className="text-xs font-medium text-gray-500 shrink-0">期間</span>
         <div className="flex gap-1.5 flex-wrap">
           {presets.map((p) => (
             <button
               key={p}
               onClick={() => setPreset(p)}
               className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-                preset === p
-                  ? 'bg-[#1B2A4A] text-white'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                preset === p ? 'bg-[#1B2A4A] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
               }`}
             >
               {p}
@@ -785,78 +803,80 @@ function LogsTab({ companyId }: { companyId: string }) {
           ))}
         </div>
         {preset === 'カスタム' && (
-          <div className="flex items-center gap-2 text-xs">
-            <input
-              type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)}
-              className="border rounded px-2 py-1 text-xs text-gray-700"
-            />
-            <span className="text-gray-400">〜</span>
-            <input
-              type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)}
-              className="border rounded px-2 py-1 text-xs text-gray-700"
-            />
+          <div className="flex items-center gap-2">
+            <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)}
+              className="border rounded px-2 py-1 text-xs text-gray-700" />
+            <span className="text-gray-400 text-xs">〜</span>
+            <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)}
+              className="border rounded px-2 py-1 text-xs text-gray-700" />
           </div>
         )}
       </div>
 
-      <HourlyChart hourlyCounts={hourlyCounts} />
+      {/* 分析ビュー */}
+      {view === 'analytics' && (
+        <HourlyChart hourlyCounts={hourlyCounts} />
+      )}
 
-      {logs.length === 0 ? (
-        <div className="text-center py-12 text-gray-400">
-          <Play className="h-10 w-10 mx-auto mb-2 opacity-40" />
-          <p>該当する視聴ログがありません</p>
-        </div>
-      ) : (
-        <div className="bg-white rounded-xl border overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b">
-              <tr>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">学生</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">視聴日時</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">視聴時間</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">視聴端末</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">完了</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {logs.map((log, i) => {
-                const deviceLabel =
-                  log.device_type === 'iPad' ? { icon: <Tablet className="h-3.5 w-3.5" />, label: 'iPad' } :
-                  log.device_type === 'スマホ' ? { icon: <Smartphone className="h-3.5 w-3.5" />, label: 'スマホ' } :
-                  log.device_type === 'PC' ? { icon: <Monitor className="h-3.5 w-3.5" />, label: 'PC' } :
-                  null
-                return (
-                <tr key={i} className="hover:bg-gray-50">
-                  <td className="px-4 py-3">
-                    <div className="font-medium">{log.student_name}</div>
-                    <div className="text-xs text-gray-400">{log.student_email}</div>
-                  </td>
-                  <td className="px-4 py-3 text-gray-500">{new Date(log.played_at).toLocaleString('ja-JP')}</td>
-                  <td className="px-4 py-3">
-                    <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{formatTime(log.watch_sec)}</span>
-                  </td>
-                  <td className="px-4 py-3">
-                    {deviceLabel ? (
-                      <span className="inline-flex items-center gap-1.5 text-gray-600">
-                        {deviceLabel.icon}{deviceLabel.label}
-                      </span>
-                    ) : (
-                      <span className="text-gray-300">—</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    {log.completed ? (
-                      <span className="inline-flex items-center gap-1 text-green-600"><CheckCircle2 className="h-4 w-4" /> 完了</span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 text-gray-400"><XCircle className="h-4 w-4" /> 途中</span>
-                    )}
-                  </td>
+      {/* ログビュー */}
+      {view === 'logs' && (
+        logs.length === 0 ? (
+          <div className="text-center py-12 text-gray-400">
+            <Play className="h-10 w-10 mx-auto mb-2 opacity-40" />
+            <p>該当する視聴ログがありません</p>
+          </div>
+        ) : (
+          <div className="bg-white rounded-xl border overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 border-b">
+                <tr>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">学生</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">視聴日時</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">視聴時間</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">視聴端末</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">完了</th>
                 </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className="divide-y">
+                {logs.map((log, i) => {
+                  const deviceLabel =
+                    log.device_type === 'iPad'  ? { icon: <Tablet     className="h-3.5 w-3.5" />, label: 'iPad'  } :
+                    log.device_type === 'スマホ' ? { icon: <Smartphone className="h-3.5 w-3.5" />, label: 'スマホ' } :
+                    log.device_type === 'PC'    ? { icon: <Monitor    className="h-3.5 w-3.5" />, label: 'PC'    } :
+                    null
+                  return (
+                    <tr key={i} className="hover:bg-gray-50">
+                      <td className="px-4 py-3">
+                        <div className="font-medium">{log.student_name}</div>
+                        <div className="text-xs text-gray-400">{log.student_email}</div>
+                      </td>
+                      <td className="px-4 py-3 text-gray-500">{new Date(log.played_at).toLocaleString('ja-JP')}</td>
+                      <td className="px-4 py-3">
+                        <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{formatTime(log.watch_sec)}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        {deviceLabel ? (
+                          <span className="inline-flex items-center gap-1.5 text-gray-600">
+                            {deviceLabel.icon}{deviceLabel.label}
+                          </span>
+                        ) : (
+                          <span className="text-gray-300">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        {log.completed ? (
+                          <span className="inline-flex items-center gap-1 text-green-600"><CheckCircle2 className="h-4 w-4" /> 完了</span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-gray-400"><XCircle className="h-4 w-4" /> 途中</span>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )
       )}
     </div>
   )
