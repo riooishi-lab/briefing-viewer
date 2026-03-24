@@ -5,7 +5,8 @@ import type { BriefingVideo, Student, SurveyQuestion, SurveyResponse } from '../
 import { toast } from 'sonner'
 import {
   Video, Users, BarChart3, ClipboardList, LogOut, Plus, Trash2,
-  Copy, Link, Clock, CheckCircle2, XCircle, Play, Upload, Download, Loader2
+  Copy, Link, Clock, CheckCircle2, XCircle, Play, Upload, Download, Loader2,
+  Monitor, Smartphone, Tablet
 } from 'lucide-react'
 
 type Tab = 'videos' | 'students' | 'surveys' | 'logs'
@@ -654,6 +655,7 @@ function HourlyChart({ hourlyCounts }: { hourlyCounts: number[] }) {
 type SessionEntry = {
   student_name: string; student_email: string; video_title: string;
   first_at: number; last_at: number; ended: boolean; last_position: number;
+  device_type: string;
 }
 
 type Preset = '今日' | '今週' | '今月' | '全期間' | 'カスタム'
@@ -684,7 +686,7 @@ function LogsTab({ companyId }: { companyId: string }) {
     const fetchLogs = async () => {
       const { data: events } = await supabase
         .from('watch_events')
-        .select('student_id, video_id, event_type, session_id, created_at, student:students(name, email), video:briefing_videos(title)')
+        .select('student_id, video_id, event_type, session_id, created_at, device_type, student:students(name, email), video:briefing_videos(title)')
         .eq('company_id', companyId)
         .order('created_at', { ascending: false })
 
@@ -700,9 +702,14 @@ function LogsTab({ companyId }: { companyId: string }) {
             student_email: e.student?.email || '',
             video_title: e.video?.title || '不明',
             first_at: t, last_at: t, ended: false, last_position: e.position_sec || 0,
+            device_type: e.device_type || '',
           }
         }
-        if (t < sessions[sid].first_at) sessions[sid].first_at = t
+        if (t < sessions[sid].first_at) {
+          sessions[sid].first_at = t
+          // 最初のイベントの端末情報を優先
+          if (e.device_type) sessions[sid].device_type = e.device_type
+        }
         if (t > sessions[sid].last_at) {
           sessions[sid].last_at = t
           sessions[sid].last_position = e.position_sec || sessions[sid].last_position
@@ -739,9 +746,9 @@ function LogsTab({ companyId }: { companyId: string }) {
       return {
         student_name: s.student_name,
         student_email: s.student_email,
-        video_title: s.video_title,
         played_at: new Date(s.first_at).toISOString(),
         watch_sec: watchSec,
+        device_type: s.device_type,
         completed: s.ended,
       }
     })
@@ -805,23 +812,37 @@ function LogsTab({ companyId }: { companyId: string }) {
             <thead className="bg-gray-50 border-b">
               <tr>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">学生</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">動画</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">視聴日時</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">視聴時間</th>
+                <th className="text-left px-4 py-3 font-medium text-gray-600">視聴端末</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">完了</th>
               </tr>
             </thead>
             <tbody className="divide-y">
-              {logs.map((log, i) => (
+              {logs.map((log, i) => {
+                const deviceLabel =
+                  log.device_type === 'iPad' ? { icon: <Tablet className="h-3.5 w-3.5" />, label: 'iPad' } :
+                  log.device_type === 'スマホ' ? { icon: <Smartphone className="h-3.5 w-3.5" />, label: 'スマホ' } :
+                  log.device_type === 'PC' ? { icon: <Monitor className="h-3.5 w-3.5" />, label: 'PC' } :
+                  null
+                return (
                 <tr key={i} className="hover:bg-gray-50">
                   <td className="px-4 py-3">
                     <div className="font-medium">{log.student_name}</div>
                     <div className="text-xs text-gray-400">{log.student_email}</div>
                   </td>
-                  <td className="px-4 py-3 text-gray-600">{log.video_title}</td>
                   <td className="px-4 py-3 text-gray-500">{new Date(log.played_at).toLocaleString('ja-JP')}</td>
                   <td className="px-4 py-3">
                     <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{formatTime(log.watch_sec)}</span>
+                  </td>
+                  <td className="px-4 py-3">
+                    {deviceLabel ? (
+                      <span className="inline-flex items-center gap-1.5 text-gray-600">
+                        {deviceLabel.icon}{deviceLabel.label}
+                      </span>
+                    ) : (
+                      <span className="text-gray-300">—</span>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     {log.completed ? (
@@ -831,7 +852,8 @@ function LogsTab({ companyId }: { companyId: string }) {
                     )}
                   </td>
                 </tr>
-              ))}
+                )
+              })}
             </tbody>
           </table>
         </div>
