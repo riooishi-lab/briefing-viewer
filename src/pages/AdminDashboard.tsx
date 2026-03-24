@@ -549,9 +549,60 @@ function SurveysTab({ companyId }: { companyId: string }) {
   )
 }
 
+// ─── 時間帯別視聴グラフ ───
+function HourlyChart({ hourlyCounts }: { hourlyCounts: number[] }) {
+  const maxCount = Math.max(...hourlyCounts, 1)
+  const total = hourlyCounts.reduce((a, b) => a + b, 0)
+  return (
+    <div className="bg-white rounded-xl border p-6">
+      <h3 className="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
+        <BarChart3 className="h-4 w-4 text-[#1B2A4A]" />
+        時間帯別 視聴集中度（全期間・{total}セッション）
+      </h3>
+      <div className="flex items-end gap-px" style={{ height: 120 }}>
+        {hourlyCounts.map((count, hour) => {
+          const heightPct = maxCount > 0 ? (count / maxCount) * 100 : 0
+          const isPeak = count === maxCount && count > 0
+          return (
+            <div key={hour} className="flex-1 flex flex-col items-center gap-0.5 group relative">
+              <div className="w-full flex flex-col justify-end" style={{ height: 100 }}>
+                <div
+                  className={`w-full rounded-t transition-all ${isPeak ? 'bg-[#1B2A4A]' : 'bg-blue-300 group-hover:bg-blue-400'}`}
+                  style={{ height: `${heightPct}%`, minHeight: count > 0 ? 2 : 0 }}
+                />
+              </div>
+              {count > 0 && (
+                <span className="absolute -top-5 left-1/2 -translate-x-1/2 bg-gray-800 text-white text-[10px] px-1 rounded opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-10">
+                  {hour}時: {count}回
+                </span>
+              )}
+              <span className="text-[9px] text-gray-400 leading-none">
+                {hour % 3 === 0 ? `${hour}` : ''}
+              </span>
+            </div>
+          )
+        })}
+      </div>
+      <div className="mt-2 flex justify-between text-[10px] text-gray-400">
+        <span>0時</span>
+        <span>6時</span>
+        <span>12時</span>
+        <span>18時</span>
+        <span>23時</span>
+      </div>
+      {total > 0 && (
+        <p className="mt-3 text-xs text-gray-500">
+          ピーク: {hourlyCounts.indexOf(maxCount)}時台（{maxCount}セッション）
+        </p>
+      )}
+    </div>
+  )
+}
+
 // ─── 視聴ログ ───
 function LogsTab({ companyId }: { companyId: string }) {
   const [logs, setLogs] = useState<{ student_name: string; student_email: string; video_title: string; played_at: string; watch_sec: number; completed: boolean }[]>([])
+  const [hourlyCounts, setHourlyCounts] = useState<number[]>(Array(24).fill(0))
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -607,7 +658,15 @@ function LogsTab({ companyId }: { companyId: string }) {
         })
         .sort((a, b) => new Date(b.played_at).getTime() - new Date(a.played_at).getTime())
 
+      // 時間帯別カウント（セッション開始時刻の時間で集計）
+      const counts = Array(24).fill(0)
+      Object.values(sessions).forEach((s) => {
+        const hour = new Date(s.first_at).getHours()
+        counts[hour]++
+      })
+
       setLogs(result)
+      setHourlyCounts(counts)
       setLoading(false)
     }
     fetchLogs()
@@ -621,46 +680,51 @@ function LogsTab({ companyId }: { companyId: string }) {
 
   if (loading) return <p className="text-gray-400 text-center py-8">読み込み中...</p>
 
-  return logs.length === 0 ? (
-    <div className="text-center py-12 text-gray-400">
-      <Play className="h-10 w-10 mx-auto mb-2 opacity-40" />
-      <p>視聴ログがまだありません</p>
-    </div>
-  ) : (
-    <div className="bg-white rounded-xl border overflow-hidden">
-      <table className="w-full text-sm">
-        <thead className="bg-gray-50 border-b">
-          <tr>
-            <th className="text-left px-4 py-3 font-medium text-gray-600">学生</th>
-            <th className="text-left px-4 py-3 font-medium text-gray-600">動画</th>
-            <th className="text-left px-4 py-3 font-medium text-gray-600">視聴日時</th>
-            <th className="text-left px-4 py-3 font-medium text-gray-600">視聴時間</th>
-            <th className="text-left px-4 py-3 font-medium text-gray-600">完了</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y">
-          {logs.map((log, i) => (
-            <tr key={i} className="hover:bg-gray-50">
-              <td className="px-4 py-3">
-                <div className="font-medium">{log.student_name}</div>
-                <div className="text-xs text-gray-400">{log.student_email}</div>
-              </td>
-              <td className="px-4 py-3 text-gray-600">{log.video_title}</td>
-              <td className="px-4 py-3 text-gray-500">{new Date(log.played_at).toLocaleString('ja-JP')}</td>
-              <td className="px-4 py-3">
-                <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{formatTime(log.watch_sec)}</span>
-              </td>
-              <td className="px-4 py-3">
-                {log.completed ? (
-                  <span className="inline-flex items-center gap-1 text-green-600"><CheckCircle2 className="h-4 w-4" /> 完了</span>
-                ) : (
-                  <span className="inline-flex items-center gap-1 text-gray-400"><XCircle className="h-4 w-4" /> 途中</span>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+  return (
+    <div className="space-y-6">
+      <HourlyChart hourlyCounts={hourlyCounts} />
+      {logs.length === 0 ? (
+        <div className="text-center py-12 text-gray-400">
+          <Play className="h-10 w-10 mx-auto mb-2 opacity-40" />
+          <p>視聴ログがまだありません</p>
+        </div>
+      ) : (
+        <div className="bg-white rounded-xl border overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b">
+              <tr>
+                <th className="text-left px-4 py-3 font-medium text-gray-600">学生</th>
+                <th className="text-left px-4 py-3 font-medium text-gray-600">動画</th>
+                <th className="text-left px-4 py-3 font-medium text-gray-600">視聴日時</th>
+                <th className="text-left px-4 py-3 font-medium text-gray-600">視聴時間</th>
+                <th className="text-left px-4 py-3 font-medium text-gray-600">完了</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {logs.map((log, i) => (
+                <tr key={i} className="hover:bg-gray-50">
+                  <td className="px-4 py-3">
+                    <div className="font-medium">{log.student_name}</div>
+                    <div className="text-xs text-gray-400">{log.student_email}</div>
+                  </td>
+                  <td className="px-4 py-3 text-gray-600">{log.video_title}</td>
+                  <td className="px-4 py-3 text-gray-500">{new Date(log.played_at).toLocaleString('ja-JP')}</td>
+                  <td className="px-4 py-3">
+                    <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{formatTime(log.watch_sec)}</span>
+                  </td>
+                  <td className="px-4 py-3">
+                    {log.completed ? (
+                      <span className="inline-flex items-center gap-1 text-green-600"><CheckCircle2 className="h-4 w-4" /> 完了</span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-gray-400"><XCircle className="h-4 w-4" /> 途中</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   )
 }
