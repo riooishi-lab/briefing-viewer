@@ -813,21 +813,53 @@ function SurveyResponseModal({ studentId, videoId, studentName, onClose }: {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const fetch = async () => {
-      const { data } = await supabase
+    const fetchData = async () => {
+      // まずjoinで取得を試みる
+      const { data, error } = await supabase
         .from('survey_responses')
-        .select('selected_choice, question:survey_questions(question_text, trigger_sec)')
+        .select('selected_choice, question_id, question:survey_questions(question_text, trigger_sec)')
         .eq('student_id', studentId)
         .eq('video_id', videoId)
-      const rows = (data || []).map((r: any) => ({
-        question_text: r.question?.question_text || '',
-        selected_choice: r.selected_choice,
-        trigger_sec: r.question?.trigger_sec ?? 0,
-      })).sort((a: any, b: any) => a.trigger_sec - b.trigger_sec)
+
+      if (!error && data && data.length > 0) {
+        const rows = data.map((r: any) => ({
+          question_text: r.question?.question_text || '',
+          selected_choice: r.selected_choice,
+          trigger_sec: r.question?.trigger_sec ?? 0,
+        })).sort((a: any, b: any) => a.trigger_sec - b.trigger_sec)
+        setResponses(rows)
+        setLoading(false)
+        return
+      }
+
+      // joinが失敗した場合のフォールバック: 個別に取得
+      const { data: resData } = await supabase
+        .from('survey_responses')
+        .select('selected_choice, question_id')
+        .eq('student_id', studentId)
+        .eq('video_id', videoId)
+
+      if (!resData || resData.length === 0) { setLoading(false); return }
+
+      const qIds = resData.map((r: any) => r.question_id)
+      const { data: qData } = await supabase
+        .from('survey_questions')
+        .select('id, question_text, trigger_sec')
+        .in('id', qIds)
+
+      const qMap = new Map((qData || []).map((q: any) => [q.id, q]))
+      const rows = resData.map((r: any) => {
+        const q = qMap.get(r.question_id)
+        return {
+          question_text: q?.question_text || '',
+          selected_choice: r.selected_choice,
+          trigger_sec: q?.trigger_sec ?? 0,
+        }
+      }).sort((a, b) => a.trigger_sec - b.trigger_sec)
       setResponses(rows)
       setLoading(false)
     }
-    fetch()
+    fetchData()
   }, [studentId, videoId])
 
   const fmt = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
@@ -895,49 +927,58 @@ function LogsTab({ companyId }: { companyId: string }) {
   const [view, setView] = useState<'logs' | 'analytics'>('logs')
   const [selectedLog, setSelectedLog] = useState<{ studentId: string; videoId: string; studentName: string } | null>(null)
 
-  useEffect(() => {
-    const fetchLogs = async () => {
-      const { data: events } = await supabase
-        .from('watch_events')
-        .select('*, student:students(name, email), video:briefing_videos(title, duration_sec)')
-        .eq('company_id', companyId)
-        .order('created_at', { ascending: false })
+  const fetchLogs = useCallback(async () => {
+    const { data: events } = await supabase
+      .from('watch_events')
+      .select('*, student:students(name, email), video:briefing_videos(title, duration_sec)')
+      .eq('company_id', companyId)
+      .order('created_at', { ascending: false })
 
-      if (!events) { setLoading(false); return }
+    if (!events) { setLoading(false); return }
 
-      const sessions: Record<string, SessionEntry> = {}
-      events.forEach((e: any) => {
-        const sid = e.session_id || e.id
-        const t = new Date(e.created_at).getTime()
-        if (!sessions[sid]) {
-          sessions[sid] = {
-            student_name: e.student?.name || '不明',
-            student_email: e.student?.email || '',
-            video_title: e.video?.title || '不明',
-            first_at: t, last_at: t, ended: false, last_position: e.position_sec || 0,
-            device_type: e.device_type || '',
-            video_duration_sec: e.video?.duration_sec || 0,
-            student_id: e.student_id,
-            video_id: e.video_id,
-          }
+    const sessions: Record<string, SessionEntry> = {}
+    events.forEach((e: any) => {
+      const sid = e.session_id || e.id
+      const t = new Date(e.created_at).getTime()
+      if (!sessions[sid]) {
+        sessions[sid] = {
+          student_name: e.student?.name || '不明',
+          student_email: e.student?.email || '',
+          video_title: e.video?.title || '不明',
+          first_at: t, last_at: t, ended: false, last_position: e.position_sec || 0,
+          device_type: e.device_type || '',
+          video_duration_sec: e.video?.duration_sec || 0,
+          student_id: e.student_id,
+          video_id: e.video_id,
         }
-        if (t < sessions[sid].first_at) {
-          sessions[sid].first_at = t
-          // 最初のイベントの端末情報を優先
-          if (e.device_type) sessions[sid].device_type = e.device_type
-        }
-        if (t > sessions[sid].last_at) {
-          sessions[sid].last_at = t
-          sessions[sid].last_position = e.position_sec || sessions[sid].last_position
-        }
-        if (e.event_type === 'ended') sessions[sid].ended = true
-      })
+      }
+      if (t < sessions[sid].first_at) {
+        sessions[sid].first_at = t
+        if (e.device_type) sessions[sid].device_type = e.device_type
+      }
+      if (t > sessions[sid].last_at) {
+        sessions[sid].last_at = t
+        sessions[sid].last_position = e.position_sec || sessions[sid].last_position
+      }
+      if (e.event_type === 'ended') sessions[sid].ended = true
+    })
 
-      setAllSessions(Object.values(sessions))
-      setLoading(false)
-    }
-    fetchLogs()
+    setAllSessions(Object.values(sessions))
+    setLoading(false)
   }, [companyId])
+
+  useEffect(() => { fetchLogs() }, [fetchLogs])
+
+  // リアルタイム購読: 新しいwatch_eventが入ったら自動更新
+  useEffect(() => {
+    const channel = supabase.channel('watch-events-realtime')
+      .on('postgres_changes', {
+        event: '*', schema: 'public', table: 'watch_events',
+        filter: `company_id=eq.${companyId}`,
+      }, () => { fetchLogs() })
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [companyId, fetchLogs])
 
   // フィルター適用
   const { from: presetFrom, to: presetTo } = getPresetRange(preset)

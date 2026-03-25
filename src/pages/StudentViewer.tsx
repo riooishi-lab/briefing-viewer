@@ -195,9 +195,14 @@ export function StudentViewer() {
     if (!video || getVideoType(video) !== 'upload') return
     const el = nativeVideoRef.current
     if (!el) return
-    const onLoadedMetadata = () => {
+    const onLoadedMetadata = async () => {
       if (el.duration && el.duration > 0 && videoRef.current) {
-        supabase.rpc('update_video_duration', { p_video_id: videoRef.current.id, p_duration: Math.round(el.duration) })
+        const dur = Math.round(el.duration)
+        const { error } = await supabase.rpc('update_video_duration', { p_video_id: videoRef.current.id, p_duration: dur })
+        if (error) {
+          await supabase.from('briefing_videos').update({ duration_sec: dur })
+            .eq('id', videoRef.current.id).is('duration_sec', null)
+        }
       }
     }
     const onPlay = () => {
@@ -249,11 +254,16 @@ export function StudentViewer() {
         height: '100%',
         playerVars: { rel: 0, modestbranding: 1, playsinline: 1 },
         events: {
-          onReady: (event: any) => {
+          onReady: async (event: any) => {
             console.log('[YT] Player ready')
             const dur = event.target?.getDuration?.()
             if (dur && dur > 0 && videoRef.current) {
-              supabase.rpc('update_video_duration', { p_video_id: videoRef.current.id, p_duration: Math.round(dur) })
+              const rounded = Math.round(dur)
+              const { error } = await supabase.rpc('update_video_duration', { p_video_id: videoRef.current.id, p_duration: rounded })
+              if (error) {
+                await supabase.from('briefing_videos').update({ duration_sec: rounded })
+                  .eq('id', videoRef.current.id).is('duration_sec', null)
+              }
             }
           },
           onStateChange: (event: any) => {
