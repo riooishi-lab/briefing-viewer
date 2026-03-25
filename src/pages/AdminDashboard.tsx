@@ -805,11 +805,68 @@ function WatchDurationChart({ watchSecs, videoDuration }: { watchSecs: number[];
   )
 }
 
+// ─── アンケート回答モーダル ───
+function SurveyResponseModal({ studentId, videoId, studentName, onClose }: {
+  studentId: string; videoId: string; studentName: string; onClose: () => void
+}) {
+  const [responses, setResponses] = useState<{ question_text: string; selected_choice: string; trigger_sec: number }[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    const fetch = async () => {
+      const { data } = await supabase
+        .from('survey_responses')
+        .select('selected_choice, question:survey_questions(question_text, trigger_sec)')
+        .eq('student_id', studentId)
+        .eq('video_id', videoId)
+      const rows = (data || []).map((r: any) => ({
+        question_text: r.question?.question_text || '',
+        selected_choice: r.selected_choice,
+        trigger_sec: r.question?.trigger_sec ?? 0,
+      })).sort((a: any, b: any) => a.trigger_sec - b.trigger_sec)
+      setResponses(rows)
+      setLoading(false)
+    }
+    fetch()
+  }, [studentId, videoId])
+
+  const fmt = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md space-y-4 p-6" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold text-gray-800 text-sm">{studentName} のアンケート回答</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors">
+            <XCircle className="h-5 w-5" />
+          </button>
+        </div>
+        {loading ? (
+          <p className="text-gray-400 text-sm text-center py-6">読み込み中...</p>
+        ) : responses.length === 0 ? (
+          <p className="text-gray-400 text-sm text-center py-6">回答はありません</p>
+        ) : (
+          <div className="space-y-3">
+            {responses.map((r, i) => (
+              <div key={i} className="border rounded-xl p-4 space-y-1.5">
+                <div className="text-xs text-gray-400">{fmt(r.trigger_sec)} 時点</div>
+                <div className="text-sm font-medium text-gray-700">{r.question_text}</div>
+                <div className="text-sm font-semibold text-[#1B2A4A]">→ {r.selected_choice}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ─── 視聴ログ ───
 type SessionEntry = {
   student_name: string; student_email: string; video_title: string;
   first_at: number; last_at: number; ended: boolean; last_position: number;
   device_type: string; video_duration_sec: number;
+  student_id: string; video_id: string;
 }
 
 type Preset = '今日' | '今週' | '今月' | '全期間' | 'カスタム'
@@ -836,6 +893,7 @@ function LogsTab({ companyId }: { companyId: string }) {
   const [customFrom, setCustomFrom] = useState('')
   const [customTo, setCustomTo] = useState('')
   const [view, setView] = useState<'logs' | 'analytics'>('logs')
+  const [selectedLog, setSelectedLog] = useState<{ studentId: string; videoId: string; studentName: string } | null>(null)
 
   useEffect(() => {
     const fetchLogs = async () => {
@@ -859,6 +917,8 @@ function LogsTab({ companyId }: { companyId: string }) {
             first_at: t, last_at: t, ended: false, last_position: e.position_sec || 0,
             device_type: e.device_type || '',
             video_duration_sec: e.video?.duration_sec || 0,
+            student_id: e.student_id,
+            video_id: e.video_id,
           }
         }
         if (t < sessions[sid].first_at) {
@@ -908,6 +968,8 @@ function LogsTab({ companyId }: { companyId: string }) {
       return {
         student_name: s.student_name,
         student_email: s.student_email,
+        student_id: s.student_id,
+        video_id: s.video_id,
         played_at: new Date(s.first_at).toISOString(),
         watch_sec: watchSec,
         device_type: s.device_type,
@@ -1012,7 +1074,10 @@ function LogsTab({ companyId }: { companyId: string }) {
                     log.device_type === 'PC'    ? { icon: <Monitor    className="h-3.5 w-3.5" />, label: 'PC'    } :
                     null
                   return (
-                    <tr key={i} className="hover:bg-gray-50">
+                    <tr key={i}
+                      className="hover:bg-blue-50 cursor-pointer transition-colors"
+                      onClick={() => setSelectedLog({ studentId: log.student_id, videoId: log.video_id, studentName: log.student_name })}
+                    >
                       <td className="px-4 py-3">
                         <div className="font-medium">{log.student_name}</div>
                         <div className="text-xs text-gray-400">{log.student_email}</div>
@@ -1044,6 +1109,15 @@ function LogsTab({ companyId }: { companyId: string }) {
             </table>
           </div>
         )
+      )}
+
+      {selectedLog && (
+        <SurveyResponseModal
+          studentId={selectedLog.studentId}
+          videoId={selectedLog.videoId}
+          studentName={selectedLog.studentName}
+          onClose={() => setSelectedLog(null)}
+        />
       )}
     </div>
   )

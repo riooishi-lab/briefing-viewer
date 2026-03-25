@@ -84,11 +84,18 @@ export function StudentViewer() {
   const recordEvent = useCallback(async (eventType: string, positionSec: number) => {
     const s = studentRef.current, v = videoRef.current
     if (!s || !v) return
-    await supabase.from('watch_events').insert({
+    const { error } = await supabase.from('watch_events').insert({
       student_id: s.id, video_id: v.id, event_type: eventType,
       position_sec: positionSec, session_id: sessionIdRef.current, company_id: s.company_id,
       device_type: deviceType,
     })
+    // device_type カラム未作成の場合はフォールバック
+    if (error) {
+      await supabase.from('watch_events').insert({
+        student_id: s.id, video_id: v.id, event_type: eventType,
+        position_sec: positionSec, session_id: sessionIdRef.current, company_id: s.company_id,
+      })
+    }
   }, [deviceType])
 
   const checkSurveyTrigger = useCallback((currentTime: number) => {
@@ -188,6 +195,11 @@ export function StudentViewer() {
     if (!video || getVideoType(video) !== 'upload') return
     const el = nativeVideoRef.current
     if (!el) return
+    const onLoadedMetadata = () => {
+      if (el.duration && el.duration > 0 && videoRef.current) {
+        supabase.rpc('update_video_duration', { p_video_id: videoRef.current.id, p_duration: Math.round(el.duration) })
+      }
+    }
     const onPlay = () => {
       recordEvent('play', el.currentTime)
       if (heartbeatRef.current) clearInterval(heartbeatRef.current)
@@ -201,10 +213,12 @@ export function StudentViewer() {
       if (surveyCheckRef.current) clearInterval(surveyCheckRef.current)
       setCompleted(true)
     }
+    el.addEventListener('loadedmetadata', onLoadedMetadata)
     el.addEventListener('play', onPlay)
     el.addEventListener('pause', onPause)
     el.addEventListener('ended', onEnded)
     return () => {
+      el.removeEventListener('loadedmetadata', onLoadedMetadata)
       el.removeEventListener('play', onPlay); el.removeEventListener('pause', onPause); el.removeEventListener('ended', onEnded)
       if (heartbeatRef.current) clearInterval(heartbeatRef.current)
       if (surveyCheckRef.current) clearInterval(surveyCheckRef.current)
@@ -235,7 +249,13 @@ export function StudentViewer() {
         height: '100%',
         playerVars: { rel: 0, modestbranding: 1, playsinline: 1 },
         events: {
-          onReady: () => console.log('[YT] Player ready'),
+          onReady: (event: any) => {
+            console.log('[YT] Player ready')
+            const dur = event.target?.getDuration?.()
+            if (dur && dur > 0 && videoRef.current) {
+              supabase.rpc('update_video_duration', { p_video_id: videoRef.current.id, p_duration: Math.round(dur) })
+            }
+          },
           onStateChange: (event: any) => {
             const p = playerRef.current
             if (!p?.getCurrentTime) return
