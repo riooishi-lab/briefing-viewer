@@ -57,6 +57,7 @@ export function StudentViewer() {
 
   const playerRef = useRef<any>(null)
   const nativeVideoRef = useRef<HTMLVideoElement>(null)
+  const ytContainerRef = useRef<HTMLDivElement>(null)
   const sessionIdRef = useRef<string>(uuidv4())
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const surveyCheckRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -84,17 +85,18 @@ export function StudentViewer() {
   const recordEvent = useCallback(async (eventType: string, positionSec: number) => {
     const s = studentRef.current, v = videoRef.current
     if (!s || !v) return
-    const { error } = await supabase.from('watch_events').insert({
+    const payload = {
       student_id: s.id, video_id: v.id, event_type: eventType,
       position_sec: positionSec, session_id: sessionIdRef.current, company_id: s.company_id,
       device_type: deviceType,
-    })
-    // device_type カラム未作成の場合はフォールバック
+    }
+    const { error } = await supabase.from('watch_events').insert(payload)
     if (error) {
-      await supabase.from('watch_events').insert({
-        student_id: s.id, video_id: v.id, event_type: eventType,
-        position_sec: positionSec, session_id: sessionIdRef.current, company_id: s.company_id,
-      })
+      console.warn('[recordEvent] insert failed, retrying without device_type:', error.message)
+      // device_type カラム未作成の場合はフォールバック
+      const { device_type: _, ...fallback } = payload
+      const { error: e2 } = await supabase.from('watch_events').insert(fallback)
+      if (e2) console.error('[recordEvent] fallback insert also failed:', e2.message)
     }
   }, [deviceType])
 
@@ -239,16 +241,22 @@ export function StudentViewer() {
       return
     }
 
+    const container = ytContainerRef.current
+    if (!container) return
+
     let destroyed = false
 
     const createPlayer = () => {
       if (destroyed) return
       if (playerRef.current) return // 既に生成済み
-      const container = document.getElementById('yt-player')
-      if (!container) return
+
+      // StrictMode 再マウント時にも確実に div を用意する
+      container.innerHTML = ''
+      const playerEl = document.createElement('div')
+      container.appendChild(playerEl)
 
       console.log('[YT] Creating player for:', youtubeId)
-      playerRef.current = new (window as any).YT.Player('yt-player', {
+      playerRef.current = new (window as any).YT.Player(playerEl, {
         videoId: youtubeId,
         width: '100%',
         height: '100%',
@@ -298,10 +306,10 @@ export function StudentViewer() {
       document.head.appendChild(tag)
     }
 
-    // YT API + DOM の両方が揃うまでポーリング（200ms間隔、最大15秒）
+    // YT API 準備完了までポーリング（200ms間隔、最大15秒）
     const poll = setInterval(() => {
       if (destroyed) { clearInterval(poll); return }
-      if ((window as any).YT?.Player && document.getElementById('yt-player')) {
+      if ((window as any).YT?.Player) {
         clearInterval(poll)
         createPlayer()
       }
@@ -360,7 +368,7 @@ export function StudentViewer() {
           {videoType === 'upload' ? (
             <video ref={nativeVideoRef} src={video.video_url!} controls className="w-full h-full" />
           ) : videoType === 'youtube' ? (
-            <div id="yt-player" className="w-full h-full" />
+            <div ref={ytContainerRef} className="w-full h-full" />
           ) : (
             <div className="w-full h-full flex items-center justify-center text-white/60">動画を準備中です</div>
           )}
