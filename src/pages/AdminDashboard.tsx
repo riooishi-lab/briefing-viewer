@@ -940,11 +940,13 @@ function LogsTab({ companyId }: { companyId: string }) {
   const [selectedLog, setSelectedLog] = useState<{ studentId: string; videoId: string; studentName: string } | null>(null)
 
   const fetchLogs = useCallback(async () => {
-    const { data: events } = await supabase
+    const { data: events, error } = await supabase
       .from('watch_events')
       .select('*, student:students(name, email), video:briefing_videos(title, duration_sec)')
       .eq('company_id', companyId)
       .order('created_at', { ascending: false })
+      .limit(10000)
+    if (error) console.error('[LogsTab] fetch failed:', error.message)
 
     if (!events) { setLoading(false); return }
 
