@@ -208,12 +208,13 @@ function StudentsTab({ companyId }: { companyId: string }) {
     const { data } = await supabase.from('students').select('*').eq('company_id', companyId).order('created_at', { ascending: false })
     const studentList = data || []
 
-    // 説明会動画の視聴有無を取得（playイベントが1つでもあれば視聴済み）
-    const { data: playEvents } = await supabase
+    // 視聴有無: play イベントのみに絞る（1セッション1件、行数上限に達しにくい）
+    const { data: playEvents, error } = await supabase
       .from('watch_events')
       .select('student_id')
       .eq('company_id', companyId)
-      .in('event_type', ['play', 'heartbeat', 'ended'])
+      .eq('event_type', 'play')
+    if (error) console.error('[StudentsTab] watch_events query failed:', error.message)
     const watchedSet = new Set((playEvents || []).map((e: { student_id: string }) => e.student_id))
 
     setStudents(studentList.map((s: Student) => ({ ...s, watched: watchedSet.has(s.id) })))
@@ -221,6 +222,17 @@ function StudentsTab({ companyId }: { companyId: string }) {
   }, [companyId])
 
   useEffect(() => { fetchStudents() }, [fetchStudents])
+
+  // 視聴イベント追加時に自動更新
+  useEffect(() => {
+    const channel = supabase.channel('students-watch-status')
+      .on('postgres_changes', {
+        event: 'INSERT', schema: 'public', table: 'watch_events',
+        filter: `company_id=eq.${companyId}`,
+      }, () => { fetchStudents() })
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [companyId, fetchStudents])
 
   const addStudent = async () => {
     if (!name || !email) return
@@ -928,11 +940,13 @@ function LogsTab({ companyId }: { companyId: string }) {
   const [selectedLog, setSelectedLog] = useState<{ studentId: string; videoId: string; studentName: string } | null>(null)
 
   const fetchLogs = useCallback(async () => {
-    const { data: events } = await supabase
+    const { data: events, error } = await supabase
       .from('watch_events')
       .select('*, student:students(name, email), video:briefing_videos(title, duration_sec)')
       .eq('company_id', companyId)
       .order('created_at', { ascending: false })
+      .limit(10000)
+    if (error) console.error('[LogsTab] fetch failed:', error.message)
 
     if (!events) { setLoading(false); return }
 
