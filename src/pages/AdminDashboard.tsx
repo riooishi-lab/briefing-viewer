@@ -97,8 +97,15 @@ function VideosTab({ companyId }: { companyId: string }) {
     fetchVideos()
   }
 
+  const hasVideo = videos.length > 0
+
   return (
     <div className="space-y-6">
+      {hasVideo ? (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800">
+          動画は1本のみ登録できます。新しい動画を追加するには、既存の動画を削除してください。
+        </div>
+      ) : (
       <div className="bg-white rounded-xl border p-6 space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="font-bold text-gray-800">動画を追加</h3>
@@ -145,6 +152,7 @@ function VideosTab({ companyId }: { companyId: string }) {
           </>
         )}
       </div>
+      )}
 
       {loading ? <p className="text-gray-400 text-center py-8">読み込み中...</p> : videos.length === 0 ? (
         <div className="text-center py-12 text-gray-400">
@@ -670,7 +678,7 @@ function DevicePieChart({ sessions }: { sessions: { device_type: string }[] }) {
   const devices = [
     { key: 'PC',    label: 'PC',    color: '#1B2A4A' },
     { key: 'スマホ', label: 'スマホ', color: '#3b82f6' },
-    { key: 'iPad',  label: 'iPad',  color: '#93c5fd' },
+    { key: 'タブレット', label: 'タブレット', color: '#93c5fd' },
   ]
   const counts = devices.map(d => sessions.filter(s => s.device_type === d.key).length)
   const total = counts.reduce((a, b) => a + b, 0)
@@ -1124,7 +1132,7 @@ function LogsTab({ companyId }: { companyId: string }) {
               <tbody className="divide-y">
                 {logs.map((log, i) => {
                   const deviceLabel =
-                    log.device_type === 'iPad'  ? { icon: <Tablet     className="h-3.5 w-3.5" />, label: 'iPad'  } :
+                    log.device_type === 'タブレット' ? { icon: <Tablet     className="h-3.5 w-3.5" />, label: 'タブレット' } :
                     log.device_type === 'スマホ' ? { icon: <Smartphone className="h-3.5 w-3.5" />, label: 'スマホ' } :
                     log.device_type === 'PC'    ? { icon: <Monitor    className="h-3.5 w-3.5" />, label: 'PC'    } :
                     null
