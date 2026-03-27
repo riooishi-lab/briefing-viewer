@@ -126,7 +126,8 @@ export function StudentViewer() {
     prevCheckPosRef.current = sec
     for (const q of questionsRef.current) {
       if (answeredIdsRef.current.has(q.id)) continue
-      if (sec >= q.trigger_sec && prevSec < q.trigger_sec) {
+      if ((sec >= q.trigger_sec && prevSec < q.trigger_sec) ||
+          (sec >= q.trigger_sec && Math.abs(sec - prevSec) > 3)) {
         setActiveQuestion(q)
         break
       }
