@@ -1014,7 +1014,7 @@ function LogsTab({ companyId }: { companyId: string }) {
         played_at: new Date(s.first_at).toISOString(),
         watch_sec: watchSec,
         device_type: s.device_type,
-        completed: s.ended,
+        completed: true,
       }
     })
     .sort((a, b) => new Date(b.played_at).getTime() - new Date(a.played_at).getTime())
