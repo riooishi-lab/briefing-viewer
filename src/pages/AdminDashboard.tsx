@@ -409,9 +409,9 @@ function SurveysTab({ companyId }: { companyId: string }) {
   const fetchAll = useCallback(async () => {
     const { data: vData } = await supabase.from('briefing_videos').select('*').eq('company_id', companyId).order('created_at', { ascending: false })
     setVideos(vData || [])
-    if (vData && vData.length > 0 && !selectedVideoId) setSelectedVideoId(vData[0].id)
+    if (vData && vData.length > 0) setSelectedVideoId(prev => prev ?? vData[0].id)
     setLoading(false)
-  }, [companyId, selectedVideoId])
+  }, [companyId])
 
   useEffect(() => { fetchAll() }, [fetchAll])
 
