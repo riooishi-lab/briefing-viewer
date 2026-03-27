@@ -59,6 +59,7 @@ export function StudentViewer() {
   const nativeVideoRef = useRef<HTMLVideoElement>(null)
   const ytContainerRef = useRef<HTMLDivElement>(null)
   const sessionIdRef = useRef<string>(uuidv4())
+  const tokenRef = useRef<string | null>(null)
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const surveyCheckRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const prevCheckPosRef = useRef<number>(0)
@@ -83,20 +84,19 @@ export function StudentViewer() {
   })()
 
   const recordEvent = useCallback(async (eventType: string, positionSec: number) => {
-    const s = studentRef.current, v = videoRef.current
-    if (!s || !v) return
-    const payload = {
-      student_id: s.id, video_id: v.id, event_type: eventType,
-      position_sec: positionSec, session_id: sessionIdRef.current, company_id: s.company_id,
-      device_type: deviceType,
-    }
-    const { error } = await supabase.from('watch_events').insert(payload)
+    const t = tokenRef.current, v = videoRef.current
+    if (!t || !v) return
+    // トークンベース RPC: サーバー側で student_id を解決（内部ID非公開）
+    const { error } = await supabase.rpc('record_watch_event', {
+      p_token: t,
+      p_video_id: v.id,
+      p_event_type: eventType,
+      p_position_sec: positionSec,
+      p_session_id: sessionIdRef.current,
+      p_device_type: deviceType,
+    })
     if (error) {
-      console.warn('[recordEvent] insert failed, retrying without device_type:', error.message)
-      // device_type カラム未作成の場合はフォールバック
-      const { device_type: _, ...fallback } = payload
-      const { error: e2 } = await supabase.from('watch_events').insert(fallback)
-      if (e2) console.error('[recordEvent] fallback insert also failed:', e2.message)
+      console.error('[recordEvent] failed:', error.message)
     }
   }, [deviceType])
 
@@ -134,12 +134,17 @@ export function StudentViewer() {
   }, [checkSurveyTrigger])
 
   const handleAnswer = async (choice: string) => {
-    const q = activeQuestionRef.current, s = studentRef.current, v = videoRef.current
-    if (!q || !s || !v) return
-    await supabase.from('survey_responses').insert({
-      student_id: s.id, question_id: q.id, video_id: v.id,
-      selected_choice: choice, session_id: sessionIdRef.current, company_id: s.company_id,
+    const q = activeQuestionRef.current, t = tokenRef.current, v = videoRef.current
+    if (!q || !t || !v) return
+    // トークンベース RPC: サーバー側で student_id を解決
+    const { error } = await supabase.rpc('record_survey_response', {
+      p_token: t,
+      p_question_id: q.id,
+      p_video_id: v.id,
+      p_selected_choice: choice,
+      p_session_id: sessionIdRef.current,
     })
+    if (error) console.error('[handleAnswer] failed:', error.message)
     setAnsweredIds((prev) => new Set([...prev, q.id]))
     setActiveQuestion(null)
   }
@@ -149,6 +154,7 @@ export function StudentViewer() {
     const init = async () => {
       const token = new URLSearchParams(window.location.search).get('token')
       if (!token) { setError('URLにトークンが含まれていません。'); setLoading(false); return }
+      tokenRef.current = token
 
       const { data: sd } = await supabase.from('students').select('*').eq('token', token).maybeSingle()
       if (!sd) { setError('URLが無効です。採用担当者にご連絡ください。'); setLoading(false); return }
