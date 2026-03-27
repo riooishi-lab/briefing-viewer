@@ -57,8 +57,8 @@ export function StudentViewer() {
 
   const playerRef = useRef<any>(null)
   const nativeVideoRef = useRef<HTMLVideoElement>(null)
-  const ytContainerRef = useRef<HTMLDivElement>(null)
   const sessionIdRef = useRef<string>(uuidv4())
+  const tokenRef = useRef<string | null>(null)
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const surveyCheckRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const prevCheckPosRef = useRef<number>(0)
@@ -83,21 +83,27 @@ export function StudentViewer() {
   })()
 
   const recordEvent = useCallback(async (eventType: string, positionSec: number) => {
-    const s = studentRef.current, v = videoRef.current
-    if (!s || !v) return
-    const payload = {
+    const v = videoRef.current
+    if (!v) return
+    // トークンベース RPC: サーバー側で student_id を解決（内部ID非公開）
+    const t = tokenRef.current
+    if (t) {
+      const { error } = await supabase.rpc('record_watch_event', {
+        p_token: t, p_video_id: v.id, p_event_type: eventType,
+        p_position_sec: positionSec, p_session_id: sessionIdRef.current, p_device_type: deviceType,
+      })
+      if (!error) return // 成功
+      console.warn('[recordEvent] RPC failed, falling back to direct insert:', error.message)
+    }
+    // フォールバック: RPC 未作成 or トークン未取得時は直接 INSERT
+    const s = studentRef.current
+    if (!s) return
+    const { error: e2 } = await supabase.from('watch_events').insert({
       student_id: s.id, video_id: v.id, event_type: eventType,
       position_sec: positionSec, session_id: sessionIdRef.current, company_id: s.company_id,
       device_type: deviceType,
-    }
-    const { error } = await supabase.from('watch_events').insert(payload)
-    if (error) {
-      console.warn('[recordEvent] insert failed, retrying without device_type:', error.message)
-      // device_type カラム未作成の場合はフォールバック
-      const { device_type: _, ...fallback } = payload
-      const { error: e2 } = await supabase.from('watch_events').insert(fallback)
-      if (e2) console.error('[recordEvent] fallback insert also failed:', e2.message)
-    }
+    })
+    if (e2) console.error('[recordEvent] direct insert also failed:', e2.message)
   }, [deviceType])
 
   const checkSurveyTrigger = useCallback((currentTime: number) => {
@@ -134,12 +140,29 @@ export function StudentViewer() {
   }, [checkSurveyTrigger])
 
   const handleAnswer = async (choice: string) => {
-    const q = activeQuestionRef.current, s = studentRef.current, v = videoRef.current
-    if (!q || !s || !v) return
-    await supabase.from('survey_responses').insert({
-      student_id: s.id, question_id: q.id, video_id: v.id,
-      selected_choice: choice, session_id: sessionIdRef.current, company_id: s.company_id,
-    })
+    const q = activeQuestionRef.current, v = videoRef.current
+    if (!q || !v) return
+    // トークンベース RPC: サーバー側で student_id を解決
+    const t = tokenRef.current
+    let saved = false
+    if (t) {
+      const { error } = await supabase.rpc('record_survey_response', {
+        p_token: t, p_question_id: q.id, p_video_id: v.id,
+        p_selected_choice: choice, p_session_id: sessionIdRef.current,
+      })
+      if (!error) saved = true
+      else console.warn('[handleAnswer] RPC failed, falling back:', error.message)
+    }
+    // フォールバック: RPC 未作成時は直接 INSERT
+    if (!saved) {
+      const s = studentRef.current
+      if (s) {
+        await supabase.from('survey_responses').insert({
+          student_id: s.id, question_id: q.id, video_id: v.id,
+          selected_choice: choice, session_id: sessionIdRef.current, company_id: s.company_id,
+        })
+      }
+    }
     setAnsweredIds((prev) => new Set([...prev, q.id]))
     setActiveQuestion(null)
   }
@@ -149,6 +172,7 @@ export function StudentViewer() {
     const init = async () => {
       const token = new URLSearchParams(window.location.search).get('token')
       if (!token) { setError('URLにトークンが含まれていません。'); setLoading(false); return }
+      tokenRef.current = token
 
       const { data: sd } = await supabase.from('students').select('*').eq('token', token).maybeSingle()
       if (!sd) { setError('URLが無効です。採用担当者にご連絡ください。'); setLoading(false); return }
@@ -241,22 +265,16 @@ export function StudentViewer() {
       return
     }
 
-    const container = ytContainerRef.current
-    if (!container) return
-
     let destroyed = false
 
     const createPlayer = () => {
       if (destroyed) return
       if (playerRef.current) return // 既に生成済み
-
-      // StrictMode 再マウント時にも確実に div を用意する
-      container.innerHTML = ''
-      const playerEl = document.createElement('div')
-      container.appendChild(playerEl)
+      const container = document.getElementById('yt-player')
+      if (!container) return
 
       console.log('[YT] Creating player for:', youtubeId)
-      playerRef.current = new (window as any).YT.Player(playerEl, {
+      playerRef.current = new (window as any).YT.Player('yt-player', {
         videoId: youtubeId,
         width: '100%',
         height: '100%',
@@ -306,10 +324,10 @@ export function StudentViewer() {
       document.head.appendChild(tag)
     }
 
-    // YT API 準備完了までポーリング（200ms間隔、最大15秒）
+    // YT API + DOM の両方が揃うまでポーリング（200ms間隔、最大15秒）
     const poll = setInterval(() => {
       if (destroyed) { clearInterval(poll); return }
-      if ((window as any).YT?.Player) {
+      if ((window as any).YT?.Player && document.getElementById('yt-player')) {
         clearInterval(poll)
         createPlayer()
       }
@@ -368,7 +386,7 @@ export function StudentViewer() {
           {videoType === 'upload' ? (
             <video ref={nativeVideoRef} src={video.video_url!} controls className="w-full h-full" />
           ) : videoType === 'youtube' ? (
-            <div ref={ytContainerRef} className="w-full h-full" />
+            <div id="yt-player" className="w-full h-full" />
           ) : (
             <div className="w-full h-full flex items-center justify-center text-white/60">動画を準備中です</div>
           )}
