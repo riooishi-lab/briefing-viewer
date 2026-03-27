@@ -77,7 +77,7 @@ export function StudentViewer() {
 
   const deviceType = (() => {
     const ua = navigator.userAgent
-    if (/iPad/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return 'iPad'
+    if (/iPad/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return 'タブレット'
     if (/iPhone|Android/.test(ua) || (/Mobile/.test(ua) && !/iPad/.test(ua))) return 'スマホ'
     return 'PC'
   })()
