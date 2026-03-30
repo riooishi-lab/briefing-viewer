@@ -1448,6 +1448,7 @@ function LogsTab({ companyId }: { companyId: string }) {
               <thead className="bg-gray-50 border-b">
                 <tr>
                   <th className="text-left px-4 py-3 font-medium text-gray-600">学生</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">アンケート</th>
                   <th className="text-left px-4 py-3 font-medium text-gray-600">視聴日時</th>
                   <th className="text-left px-4 py-3 font-medium text-gray-600">視聴時間</th>
                   <th className="text-left px-4 py-3 font-medium text-gray-600">視聴端末</th>
@@ -1471,6 +1472,13 @@ function LogsTab({ companyId }: { companyId: string }) {
                         <div className="font-medium">{log.student_name}</div>
                         <div className="text-xs text-gray-400">{log.student_email}</div>
                       </td>
+                      <td className="px-4 py-3">
+                        {log.survey_set_name ? (
+                          <span className="text-xs text-gray-600">{log.survey_set_name}</span>
+                        ) : (
+                          <span className="text-gray-300">—</span>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-gray-500">{new Date(log.played_at).toLocaleString('ja-JP')}</td>
                       <td className="px-4 py-3">
                         <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{formatTime(log.watch_sec)}</span>
@@ -1486,14 +1494,9 @@ function LogsTab({ companyId }: { companyId: string }) {
                       </td>
                       <td className="px-4 py-3">
                         {log.has_response ? (
-                          <div>
-                            <span className="text-xs font-medium text-green-600">Y</span>
-                            {log.survey_set_name && (
-                              <div className="text-xs text-gray-400 truncate max-w-[120px]">{log.survey_set_name}</div>
-                            )}
-                          </div>
+                          <span className="text-xs font-medium text-green-600">回答</span>
                         ) : (
-                          <span className="text-xs font-medium text-gray-400">N</span>
+                          <span className="text-xs font-medium text-gray-400">未回答</span>
                         )}
                       </td>
                       <td className="px-4 py-3">
