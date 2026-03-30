@@ -49,6 +49,7 @@ export interface BriefingVideo {
   duration_sec: number | null
   is_published: boolean
   chapter_survey_mode: 'all' | 'chapter_only'
+  chapter_display_mode: 'none' | 'text' | 'image'
   company_id: string
   created_at: string
 }
@@ -93,6 +94,7 @@ export interface VideoChapter {
   label: string
   start_sec: number
   sort_order: number
+  thumbnail_url: string | null
   company_id: string
   created_at: string
 }
