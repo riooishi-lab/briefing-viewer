@@ -65,56 +65,7 @@ function ChapterSelectText({
   )
 }
 
-// ─── チャプター選択画面（画像・Netflix風グリッド） ───
-function ChapterSelectImage({
-  chapters, videoTitle, onSelect,
-}: { chapters: VideoChapter[]; videoTitle: string; onSelect: (ch: VideoChapter | null) => void }) {
-  const fmt = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
-  return (
-    <div className="w-full h-full flex flex-col bg-gradient-to-b from-gray-900 to-black text-white overflow-auto">
-      {/* メイン: 最初から見る */}
-      <button onClick={() => onSelect(null)}
-        className="relative w-full aspect-video bg-gray-800 hover:brightness-110 transition-all shrink-0 group">
-        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
-        <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <div className="w-16 h-16 bg-white/20 group-hover:bg-white/30 rounded-full flex items-center justify-center backdrop-blur-sm transition-colors">
-            <Play className="h-8 w-8 text-white ml-1" />
-          </div>
-          <p className="mt-3 font-bold text-lg">最初から見る</p>
-          <p className="text-xs text-white/50">{videoTitle}</p>
-        </div>
-      </button>
-
-      {/* サムネイルグリッド */}
-      {chapters.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 p-3">
-          {chapters.map((ch) => (
-            <button key={ch.id} onClick={() => onSelect(ch)}
-              className="relative rounded-lg overflow-hidden bg-gray-800 hover:brightness-110 transition-all group aspect-video">
-              {ch.thumbnail_url ? (
-                <img src={ch.thumbnail_url} alt={ch.label} className="w-full h-full object-cover" />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center bg-gray-700">
-                  <Play className="h-6 w-6 text-white/40" />
-                </div>
-              )}
-              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
-              <div className="absolute bottom-0 left-0 right-0 p-2">
-                <p className="text-xs font-medium truncate">{ch.label}</p>
-                <p className="text-[10px] text-white/50">{fmt(ch.start_sec)}〜</p>
-              </div>
-              <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center backdrop-blur-sm">
-                  <Play className="h-5 w-5 text-white ml-0.5" />
-                </div>
-              </div>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
+// ChapterSelectImage は廃止（動画下グリッドに移行）
 
 // 動画の種類を判定するヘルパー
 // ─── YouTube風カスタムコントロール ───
