@@ -463,13 +463,16 @@ function ChaptersTab({ companyId }: { companyId: string }) {
 
   const updateDisplayMode = async (mode: 'none' | 'text' | 'image') => {
     if (!selectedVideoId) return
-    await supabase.from('briefing_videos').update({ chapter_display_mode: mode }).eq('id', selectedVideoId)
+    const { error } = await supabase.from('briefing_videos').update({ chapter_display_mode: mode }).eq('id', selectedVideoId)
+    if (error) { toast.error('保存に失敗しました。SQLマイグレーションを確認してください。'); console.error(error.message); return }
     setVideos(prev => prev.map(v => v.id === selectedVideoId ? { ...v, chapter_display_mode: mode } : v))
+    toast.success('表示モードを変更しました')
   }
 
   const updateSurveyMode = async (mode: 'all' | 'chapter_only') => {
     if (!selectedVideoId) return
-    await supabase.from('briefing_videos').update({ chapter_survey_mode: mode }).eq('id', selectedVideoId)
+    const { error } = await supabase.from('briefing_videos').update({ chapter_survey_mode: mode }).eq('id', selectedVideoId)
+    if (error) { toast.error('保存に失敗しました'); console.error(error.message); return }
     setVideos(prev => prev.map(v => v.id === selectedVideoId ? { ...v, chapter_survey_mode: mode } : v))
   }
 
