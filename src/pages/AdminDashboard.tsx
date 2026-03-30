@@ -1544,54 +1544,60 @@ export function AdminDashboard() {
   const companyName = adminUser.company?.name || ''
 
   const tabs: { key: Tab; label: string; icon: React.ReactNode }[] = [
-    { key: 'videos', label: '動画管理', icon: <Video className="h-4 w-4" /> },
-    { key: 'students', label: '学生管理', icon: <Users className="h-4 w-4" /> },
-    { key: 'chapters', label: 'パート設定', icon: <Layers className="h-4 w-4" /> },
-    { key: 'surveys', label: 'アンケート', icon: <ClipboardList className="h-4 w-4" /> },
-    { key: 'logs', label: '視聴ログ', icon: <BarChart3 className="h-4 w-4" /> },
+    { key: 'videos', label: '動画管理', icon: <Video className="h-5 w-5" /> },
+    { key: 'students', label: '学生管理', icon: <Users className="h-5 w-5" /> },
+    { key: 'chapters', label: 'パート設定', icon: <Layers className="h-5 w-5" /> },
+    { key: 'surveys', label: 'アンケート', icon: <ClipboardList className="h-5 w-5" /> },
+    { key: 'logs', label: '視聴ログ', icon: <BarChart3 className="h-5 w-5" /> },
   ]
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* ヘッダー */}
-      <header className="bg-white border-b sticky top-0 z-10">
-        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
+    <div className="min-h-screen bg-gray-100 flex">
+      {/* サイドバー */}
+      <aside className="w-56 bg-white border-r fixed top-0 left-0 bottom-0 z-10 flex flex-col">
+        <div className="px-4 py-5 border-b">
+          <div className="flex items-center gap-2">
             <Video className="h-6 w-6 text-[#1B2A4A]" />
             <div>
-              <h1 className="font-bold text-[#1B2A4A] text-lg">説明会動画配信</h1>
-              <p className="text-xs text-gray-400">{companyName}</p>
+              <h1 className="font-bold text-[#1B2A4A] text-sm leading-tight">説明会動画配信</h1>
+              <p className="text-[10px] text-gray-400">{companyName}</p>
             </div>
           </div>
-          <div className="flex items-center gap-4">
-            <span className="text-xs text-gray-400">{adminUser.email}</span>
-            <button onClick={signOut} className="text-gray-400 hover:text-gray-600 flex items-center gap-1 text-sm">
-              <LogOut className="h-4 w-4" /> ログアウト
-            </button>
-          </div>
         </div>
-      </header>
 
-      {/* タブ */}
-      <div className="max-w-6xl mx-auto px-6 pt-6">
-        <div className="flex gap-1 border-b">
+        <nav className="flex-1 py-2 px-2 space-y-0.5">
           {tabs.map((t) => (
             <button key={t.key} onClick={() => setTab(t.key)}
-              className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${tab === t.key ? 'border-[#1B2A4A] text-[#1B2A4A]' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
-              {t.icon} {t.label}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                tab === t.key
+                  ? 'bg-[#1B2A4A]/10 text-[#1B2A4A]'
+                  : 'text-gray-600 hover:bg-gray-100'
+              }`}>
+              {t.icon}
+              {t.label}
             </button>
           ))}
-        </div>
-      </div>
+        </nav>
 
-      {/* コンテンツ */}
-      <div className="max-w-6xl mx-auto px-6 py-6">
-        {tab === 'videos' && <VideosTab companyId={companyId} />}
-        {tab === 'students' && <StudentsTab companyId={companyId} />}
-        {tab === 'chapters' && <ChaptersTab companyId={companyId} />}
-        {tab === 'surveys' && <SurveysTab companyId={companyId} />}
-        {tab === 'logs' && <LogsTab companyId={companyId} />}
-      </div>
+        <div className="px-4 py-4 border-t space-y-2">
+          <p className="text-xs text-gray-400 truncate">{adminUser.email}</p>
+          <button onClick={signOut} className="w-full flex items-center gap-2 px-3 py-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg text-sm transition-colors">
+            <LogOut className="h-4 w-4" /> ログアウト
+          </button>
+        </div>
+      </aside>
+
+      {/* メインコンテンツ */}
+      <main className="flex-1 ml-56 p-8">
+        <div className="max-w-5xl mx-auto">
+          <h2 className="text-xl font-bold text-gray-800 mb-6">{tabs.find(t => t.key === tab)?.label}</h2>
+          {tab === 'videos' && <VideosTab companyId={companyId} />}
+          {tab === 'students' && <StudentsTab companyId={companyId} />}
+          {tab === 'chapters' && <ChaptersTab companyId={companyId} />}
+          {tab === 'surveys' && <SurveysTab companyId={companyId} />}
+          {tab === 'logs' && <LogsTab companyId={companyId} />}
+        </div>
+      </main>
     </div>
   )
 }
