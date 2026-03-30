@@ -463,13 +463,16 @@ function ChaptersTab({ companyId }: { companyId: string }) {
 
   const updateDisplayMode = async (mode: 'none' | 'text' | 'image') => {
     if (!selectedVideoId) return
-    await supabase.from('briefing_videos').update({ chapter_display_mode: mode }).eq('id', selectedVideoId)
+    const { error } = await supabase.from('briefing_videos').update({ chapter_display_mode: mode }).eq('id', selectedVideoId)
+    if (error) { toast.error('保存に失敗しました。SQLマイグレーションを確認してください。'); console.error(error.message); return }
     setVideos(prev => prev.map(v => v.id === selectedVideoId ? { ...v, chapter_display_mode: mode } : v))
+    toast.success('表示モードを変更しました')
   }
 
   const updateSurveyMode = async (mode: 'all' | 'chapter_only') => {
     if (!selectedVideoId) return
-    await supabase.from('briefing_videos').update({ chapter_survey_mode: mode }).eq('id', selectedVideoId)
+    const { error } = await supabase.from('briefing_videos').update({ chapter_survey_mode: mode }).eq('id', selectedVideoId)
+    if (error) { toast.error('保存に失敗しました'); console.error(error.message); return }
     setVideos(prev => prev.map(v => v.id === selectedVideoId ? { ...v, chapter_survey_mode: mode } : v))
   }
 
@@ -478,7 +481,7 @@ function ChaptersTab({ companyId }: { companyId: string }) {
     const ext = file.name.split('.').pop() || 'jpg'
     const path = `${companyId}/chapters/${chapterId}.${ext}`
     const { error: upErr } = await supabase.storage.from('videos').upload(path, file, { contentType: file.type, upsert: true })
-    if (upErr) { toast.error('アップロード失敗'); setUploading(null); return }
+    if (upErr) { toast.error(`アップロード失敗: ${upErr.message}`); console.error('[uploadThumbnail]', upErr); setUploading(null); return }
     const { data: urlData } = supabase.storage.from('videos').getPublicUrl(path)
     await supabase.from('video_chapters').update({ thumbnail_url: urlData.publicUrl }).eq('id', chapterId)
     toast.success('サムネイルを設定しました')
@@ -543,31 +546,35 @@ function ChaptersTab({ companyId }: { companyId: string }) {
               {chapters.length > 0 && (
                 <div className="space-y-2">
                   {chapters.map((ch, i) => (
-                    <div key={ch.id} className="flex items-center gap-3 px-3 py-2 bg-gray-50 rounded-lg">
-                      {/* サムネイル（画像モード時） */}
-                      {displayMode === 'image' && (
-                        <div className="w-20 h-12 rounded overflow-hidden bg-gray-200 shrink-0 relative">
-                          {ch.thumbnail_url ? (
-                            <img src={ch.thumbnail_url} alt="" className="w-full h-full object-cover" />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center text-gray-400">
-                              <Image className="h-4 w-4" />
-                            </div>
-                          )}
-                          <label className="absolute inset-0 cursor-pointer opacity-0 hover:opacity-100 bg-black/40 flex items-center justify-center text-white text-xs transition-opacity">
-                            {uploading === ch.id ? '...' : '変更'}
-                            <input type="file" accept="image/*" className="hidden"
-                              onChange={e => { if (e.target.files?.[0]) uploadThumbnail(ch.id, e.target.files[0]) }} />
-                          </label>
+                    <div key={ch.id} className="flex items-center gap-3 px-3 py-3 bg-gray-50 rounded-lg">
+                      {/* サムネイル */}
+                      <div className="w-24 h-14 rounded-lg overflow-hidden bg-gray-200 shrink-0 relative group">
+                        {ch.thumbnail_url ? (
+                          <img src={ch.thumbnail_url} alt="" className="w-full h-full object-cover" />
+                        ) : (
+                          <div className="w-full h-full flex flex-col items-center justify-center text-gray-400">
+                            <Image className="h-5 w-5" />
+                          </div>
+                        )}
+                        <label className={`absolute inset-0 cursor-pointer flex items-center justify-center transition-opacity ${
+                          ch.thumbnail_url ? 'opacity-0 group-hover:opacity-100 bg-black/50' : 'opacity-100 hover:bg-gray-300'
+                        }`}>
+                          <span className="text-xs font-medium text-white bg-[#1B2A4A]/80 px-2 py-1 rounded">
+                            {uploading === ch.id ? '...' : ch.thumbnail_url ? '変更' : '画像を選択'}
+                          </span>
+                          <input type="file" accept="image/*" className="hidden"
+                            onChange={e => { if (e.target.files?.[0]) uploadThumbnail(ch.id, e.target.files[0]) }} />
+                        </label>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium">
+                          <span className="text-gray-400 mr-1">{i + 1}.</span>
+                          {ch.label}
                         </div>
-                      )}
-                      <span className="flex-1 text-sm">
-                        <span className="text-gray-400 mr-2">{i + 1}.</span>
-                        {ch.label}
-                        <span className="text-xs text-gray-400 ml-1">{fmt(ch.start_sec)}〜</span>
-                      </span>
+                        <div className="text-xs text-gray-400">{fmt(ch.start_sec)}〜</div>
+                      </div>
                       <button onClick={() => deleteChapter(ch.id)} className="text-red-400 hover:text-red-600 shrink-0">
-                        <Trash2 className="h-3.5 w-3.5" />
+                        <Trash2 className="h-4 w-4" />
                       </button>
                     </div>
                   ))}
