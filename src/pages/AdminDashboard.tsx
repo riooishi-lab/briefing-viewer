@@ -1257,6 +1257,8 @@ function LogsTab({ companyId }: { companyId: string }) {
   const [customTo, setCustomTo] = useState('')
   const [view, setView] = useState<'logs' | 'analytics'>('logs')
   const [selectedLog, setSelectedLog] = useState<{ studentId: string; videoId: string; studentName: string } | null>(null)
+  const [setNames, setSetNames] = useState<string[]>([])
+  const [filterSetName, setFilterSetName] = useState<string>('')
 
   const fetchLogs = useCallback(async () => {
     const [{ data: events, error }, { data: respData }, { data: setsData }] = await Promise.all([
@@ -1312,7 +1314,10 @@ function LogsTab({ companyId }: { companyId: string }) {
       if (e.event_type === 'ended') sessions[sid].ended = true
     })
 
-    setAllSessions(Object.values(sessions))
+    const sessionList = Object.values(sessions)
+    setAllSessions(sessionList)
+    const names = [...new Set(sessionList.map(s => s.survey_set_name).filter(Boolean))]
+    setSetNames(names)
     setLoading(false)
   }, [companyId])
 
@@ -1339,6 +1344,7 @@ function LogsTab({ companyId }: { companyId: string }) {
     const dStr = d.toISOString().slice(0, 10)
     if (fromStr && dStr < fromStr) return false
     if (toStr   && dStr > toStr)   return false
+    if (filterSetName && s.survey_set_name !== filterSetName) return false
     return true
   })
 
@@ -1421,6 +1427,19 @@ function LogsTab({ companyId }: { companyId: string }) {
             <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)}
               className="border rounded px-2 py-1 text-xs text-gray-700" />
           </div>
+        )}
+
+        {/* アンケートセットフィルタ */}
+        {setNames.length > 0 && (
+          <>
+            <div className="w-px h-5 bg-gray-200 shrink-0" />
+            <span className="text-xs font-medium text-gray-500 shrink-0">アンケート</span>
+            <select value={filterSetName} onChange={e => setFilterSetName(e.target.value)}
+              className="px-2 py-1 border rounded text-xs text-gray-700 bg-white">
+              <option value="">すべて</option>
+              {setNames.map(n => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </>
         )}
       </div>
 
