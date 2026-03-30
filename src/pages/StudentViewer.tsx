@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
-import type { Student, BriefingVideo, SurveyQuestion, VideoChapter } from '../lib/supabase'
+import type { Student, BriefingVideo, SurveyQuestion, SurveySet, VideoChapter } from '../lib/supabase'
 import { v4 as uuidv4 } from 'uuid'
 import { AlertCircle, CheckCircle2, Play, Maximize, Minimize } from 'lucide-react'
 
@@ -101,6 +101,7 @@ export function StudentViewer() {
   const [video, setVideo] = useState<BriefingVideo | null>(null)
   const [questions, setQuestions] = useState<SurveyQuestion[]>([])
   const [chapters, setChapters] = useState<VideoChapter[]>([])
+  const [activeSurveySet, setActiveSurveySet] = useState<SurveySet | null>(null)
   const [answeredIds, setAnsweredIds] = useState<Set<string>>(new Set())
   const [activeQuestion, setActiveQuestion] = useState<SurveyQuestion | null>(null)
   const [error, setError] = useState('')
@@ -128,6 +129,7 @@ export function StudentViewer() {
   const videoRef = useRef(video)
   const chaptersRef = useRef(chapters)
   const selectedChapterRef = useRef(selectedChapter)
+  const activeSurveySetRef = useRef(activeSurveySet)
   questionsRef.current = questions
   answeredIdsRef.current = answeredIds
   activeQuestionRef.current = activeQuestion
@@ -135,6 +137,7 @@ export function StudentViewer() {
   videoRef.current = video
   chaptersRef.current = chapters
   selectedChapterRef.current = selectedChapter
+  activeSurveySetRef.current = activeSurveySet
 
   const deviceType = (() => {
     const ua = navigator.userAgent
@@ -250,6 +253,7 @@ export function StudentViewer() {
         await supabase.from('survey_responses').insert({
           student_id: s.id, question_id: q.id, video_id: v.id,
           selected_choice: choice, session_id: sessionIdRef.current, company_id: s.company_id,
+          survey_set_id: activeSurveySetRef.current?.id || null,
         })
       }
     } catch (e) {
@@ -331,9 +335,23 @@ export function StudentViewer() {
       // チャプターが無い場合は選択画面をスキップ
       if (chList.length === 0) setSelectedChapter(null)
 
-      const { data: qd } = await supabase.from('survey_questions').select('*')
-        .eq('video_id', vd.id).order('trigger_sec', { ascending: true })
-      setQuestions(qd || [])
+      // 有効なアンケートセットの設問のみ取得
+      const { data: setData } = await supabase.from('survey_sets').select('*')
+        .eq('video_id', vd.id).eq('is_active', true).limit(1).maybeSingle()
+      setActiveSurveySet(setData || null)
+
+      let qd: any[] = []
+      if (setData) {
+        const { data } = await supabase.from('survey_questions').select('*')
+          .eq('survey_set_id', setData.id).order('trigger_sec', { ascending: true })
+        qd = data || []
+      } else {
+        // セット未作成時: 従来互換（全設問取得）
+        const { data } = await supabase.from('survey_questions').select('*')
+          .eq('video_id', vd.id).order('trigger_sec', { ascending: true })
+        qd = data || []
+      }
+      setQuestions(qd)
 
       const { data: rd } = await supabase.from('survey_responses').select('question_id')
         .eq('student_id', sd.id).eq('video_id', vd.id)
