@@ -6,7 +6,7 @@ import { toast } from 'sonner'
 import {
   Video, Users, BarChart3, ClipboardList, LogOut, Plus, Trash2,
   Copy, Link, Clock, CheckCircle2, XCircle, Play, Upload, Download, Loader2,
-  Monitor, Smartphone, Tablet, Layers
+  Monitor, Smartphone, Tablet, Layers, Menu, X
 } from 'lucide-react'
 
 type Tab = 'videos' | 'students' | 'chapters' | 'surveys' | 'logs'
@@ -603,7 +603,7 @@ function SurveysTab({ companyId }: { companyId: string }) {
       const { data: srcQuestions } = await supabase.from('survey_questions').select('*').eq('survey_set_id', copyFromSetId)
       if (srcQuestions && srcQuestions.length > 0) {
         const copies = srcQuestions.map((q: any) => ({
-          video_id: q.video_id, trigger_sec: q.trigger_sec, question_text: q.question_text,
+          video_id: selectedVideoId, trigger_sec: q.trigger_sec, question_text: q.question_text,
           choices: q.choices, chapter_id: q.chapter_id, company_id: q.company_id,
           survey_set_id: newSet.id,
         }))
@@ -1539,6 +1539,8 @@ export function AdminDashboard() {
   const [tab, setTabState] = useState<Tab>(getInitialTab)
   const setTab = (t: Tab) => { setTabState(t); window.location.hash = t }
 
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+
   if (!adminUser) return null
   const companyId = adminUser.company_id
   const companyName = adminUser.company?.name || ''
@@ -1551,11 +1553,27 @@ export function AdminDashboard() {
     { key: 'logs', label: '視聴ログ', icon: <BarChart3 className="h-5 w-5" /> },
   ]
 
+  const handleTabClick = (t: Tab) => { setTab(t); setSidebarOpen(false) }
+
   return (
-    <div className="min-h-screen bg-gray-100 flex">
+    <div className="min-h-screen bg-gray-100 md:flex">
+      {/* モバイルヘッダー */}
+      <div className="md:hidden bg-white border-b px-4 py-3 flex items-center justify-between sticky top-0 z-20">
+        <button onClick={() => setSidebarOpen(true)} className="p-1 text-gray-600">
+          <Menu className="h-6 w-6" />
+        </button>
+        <span className="font-bold text-[#1B2A4A] text-sm">{tabs.find(t => t.key === tab)?.label}</span>
+        <div className="w-6" />
+      </div>
+
+      {/* オーバーレイ（モバイル） */}
+      {sidebarOpen && (
+        <div className="fixed inset-0 bg-black/40 z-30 md:hidden" onClick={() => setSidebarOpen(false)} />
+      )}
+
       {/* サイドバー */}
-      <aside className="w-56 bg-white border-r fixed top-0 left-0 bottom-0 z-10 flex flex-col">
-        <div className="px-4 py-5 border-b">
+      <aside className={`w-56 bg-white border-r fixed top-0 left-0 bottom-0 z-40 flex flex-col transition-transform duration-200 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0`}>
+        <div className="px-4 py-5 border-b flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Video className="h-6 w-6 text-[#1B2A4A]" />
             <div>
@@ -1563,11 +1581,14 @@ export function AdminDashboard() {
               <p className="text-[10px] text-gray-400">{companyName}</p>
             </div>
           </div>
+          <button onClick={() => setSidebarOpen(false)} className="md:hidden p-1 text-gray-400">
+            <X className="h-5 w-5" />
+          </button>
         </div>
 
         <nav className="flex-1 py-2 px-2 space-y-0.5">
           {tabs.map((t) => (
-            <button key={t.key} onClick={() => setTab(t.key)}
+            <button key={t.key} onClick={() => handleTabClick(t.key)}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                 tab === t.key
                   ? 'bg-[#1B2A4A]/10 text-[#1B2A4A]'
@@ -1588,9 +1609,9 @@ export function AdminDashboard() {
       </aside>
 
       {/* メインコンテンツ */}
-      <main className="flex-1 ml-56 p-8">
+      <main className="flex-1 md:ml-56 p-4 md:p-8">
         <div className="max-w-5xl mx-auto">
-          <h2 className="text-xl font-bold text-gray-800 mb-6">{tabs.find(t => t.key === tab)?.label}</h2>
+          <h2 className="text-xl font-bold text-gray-800 mb-6 hidden md:block">{tabs.find(t => t.key === tab)?.label}</h2>
           {tab === 'videos' && <VideosTab companyId={companyId} />}
           {tab === 'students' && <StudentsTab companyId={companyId} />}
           {tab === 'chapters' && <ChaptersTab companyId={companyId} />}
