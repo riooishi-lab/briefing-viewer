@@ -1229,7 +1229,7 @@ type SessionEntry = {
   first_at: number; last_at: number; ended: boolean; last_position: number;
   device_type: string; video_duration_sec: number;
   student_id: string; video_id: string;
-  response_count: number; question_count: number;
+  has_response: boolean; survey_set_name: string;
 }
 
 type Preset = '今日' | '今週' | '今月' | '全期間' | 'カスタム'
@@ -1259,27 +1259,27 @@ function LogsTab({ companyId }: { companyId: string }) {
   const [selectedLog, setSelectedLog] = useState<{ studentId: string; videoId: string; studentName: string } | null>(null)
 
   const fetchLogs = useCallback(async () => {
-    const [{ data: events, error }, { data: respData }, { data: qData }] = await Promise.all([
+    const [{ data: events, error }, { data: respData }, { data: setsData }] = await Promise.all([
       supabase.from('watch_events')
         .select('*, student:students(name, email), video:briefing_videos(title, duration_sec)')
         .eq('company_id', companyId).order('created_at', { ascending: false }).limit(10000),
-      supabase.from('survey_responses').select('student_id, video_id').eq('company_id', companyId),
-      supabase.from('survey_questions').select('id, video_id').eq('company_id', companyId),
+      supabase.from('survey_responses').select('student_id, video_id, survey_set_id').eq('company_id', companyId),
+      supabase.from('survey_sets').select('id, name').eq('company_id', companyId),
     ])
     if (error) console.error('[LogsTab] fetch failed:', error.message)
     if (!events) { setLoading(false); return }
 
-    // 学生×動画ごとの回答数を集計
-    const respCountMap: Record<string, number> = {}
+    // 学生×動画: 回答有無を判定
+    const respHasMap: Record<string, boolean> = {}
+    const respSetMap: Record<string, string> = {} // 学生×動画 → survey_set_id
     ;(respData || []).forEach((r: any) => {
       const key = `${r.student_id}_${r.video_id}`
-      respCountMap[key] = (respCountMap[key] || 0) + 1
+      respHasMap[key] = true
+      if (r.survey_set_id) respSetMap[key] = r.survey_set_id
     })
-    // 動画ごとの設問数
-    const qCountMap: Record<string, number> = {}
-    ;(qData || []).forEach((q: any) => {
-      qCountMap[q.video_id] = (qCountMap[q.video_id] || 0) + 1
-    })
+    // セットID → 名前
+    const setNameMap: Record<string, string> = {}
+    ;(setsData || []).forEach((s: any) => { setNameMap[s.id] = s.name })
 
     const sessions: Record<string, SessionEntry> = {}
     events.forEach((e: any) => {
@@ -1287,6 +1287,7 @@ function LogsTab({ companyId }: { companyId: string }) {
       const t = new Date(e.created_at).getTime()
       if (!sessions[sid]) {
         const rKey = `${e.student_id}_${e.video_id}`
+        const setId = respSetMap[rKey]
         sessions[sid] = {
           student_name: e.student?.name || '不明',
           student_email: e.student?.email || '',
@@ -1296,8 +1297,8 @@ function LogsTab({ companyId }: { companyId: string }) {
           video_duration_sec: e.video?.duration_sec || 0,
           student_id: e.student_id,
           video_id: e.video_id,
-          response_count: respCountMap[rKey] || 0,
-          question_count: qCountMap[e.video_id] || 0,
+          has_response: !!respHasMap[rKey],
+          survey_set_name: setId ? (setNameMap[setId] || '') : '',
         }
       }
       if (t < sessions[sid].first_at) {
@@ -1359,8 +1360,8 @@ function LogsTab({ companyId }: { companyId: string }) {
         watch_sec: watchSec,
         device_type: s.device_type,
         completed: true,
-        response_count: s.response_count,
-        question_count: s.question_count,
+        has_response: s.has_response,
+        survey_set_name: s.survey_set_name,
       }
     })
     .sort((a, b) => new Date(b.played_at).getTime() - new Date(a.played_at).getTime())
@@ -1484,12 +1485,15 @@ function LogsTab({ companyId }: { companyId: string }) {
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        {log.question_count > 0 ? (
-                          <span className={`text-xs font-medium ${log.response_count >= log.question_count ? 'text-green-600' : log.response_count > 0 ? 'text-amber-600' : 'text-gray-400'}`}>
-                            {log.response_count}/{log.question_count}
-                          </span>
+                        {log.has_response ? (
+                          <div>
+                            <span className="text-xs font-medium text-green-600">Y</span>
+                            {log.survey_set_name && (
+                              <div className="text-xs text-gray-400 truncate max-w-[120px]">{log.survey_set_name}</div>
+                            )}
+                          </div>
                         ) : (
-                          <span className="text-gray-300">—</span>
+                          <span className="text-xs font-medium text-gray-400">N</span>
                         )}
                       </td>
                       <td className="px-4 py-3">
