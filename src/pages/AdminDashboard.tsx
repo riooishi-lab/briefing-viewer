@@ -1528,9 +1528,16 @@ function LogsTab({ companyId }: { companyId: string }) {
 }
 
 // ─── メインダッシュボード ───
+const validTabs: Tab[] = ['videos', 'students', 'chapters', 'surveys', 'logs']
+function getInitialTab(): Tab {
+  const hash = window.location.hash.replace('#', '') as Tab
+  return validTabs.includes(hash) ? hash : 'videos'
+}
+
 export function AdminDashboard() {
   const { adminUser, signOut } = useAuth()
-  const [tab, setTab] = useState<Tab>('videos')
+  const [tab, setTabState] = useState<Tab>(getInitialTab)
+  const setTab = (t: Tab) => { setTabState(t); window.location.hash = t }
 
   if (!adminUser) return null
   const companyId = adminUser.company_id
