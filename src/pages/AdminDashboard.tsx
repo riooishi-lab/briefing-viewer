@@ -1359,7 +1359,7 @@ function LogsTab({ companyId }: { companyId: string }) {
         played_at: new Date(s.first_at).toISOString(),
         watch_sec: watchSec,
         device_type: s.device_type,
-        completed: true,
+        completed: s.video_duration_sec > 0 ? s.last_position >= s.video_duration_sec * 0.9 : s.ended,
         has_response: s.has_response,
         survey_set_name: s.survey_set_name,
       }
