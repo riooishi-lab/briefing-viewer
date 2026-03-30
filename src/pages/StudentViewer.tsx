@@ -1,8 +1,8 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
-import type { Student, BriefingVideo, SurveyQuestion } from '../lib/supabase'
+import type { Student, BriefingVideo, SurveyQuestion, VideoChapter } from '../lib/supabase'
 import { v4 as uuidv4 } from 'uuid'
-import { AlertCircle, CheckCircle2 } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Play, Maximize, Minimize } from 'lucide-react'
 
 const extractYouTubeId = (url: string | null | undefined): string | null => {
   if (!url) return null
@@ -38,6 +38,50 @@ function SurveyOverlay({
   )
 }
 
+// ─── チャプター選択画面 ───
+function ChapterSelect({
+  chapters,
+  videoTitle,
+  onSelect,
+}: {
+  chapters: VideoChapter[]
+  videoTitle: string
+  onSelect: (chapter: VideoChapter | null) => void
+}) {
+  const fmt = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+  return (
+    <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-b from-gray-900 to-black text-white p-6">
+      <h2 className="text-lg font-bold mb-1">{videoTitle}</h2>
+      <p className="text-sm text-white/60 mb-6">どこから視聴しますか？</p>
+      <div className="w-full max-w-md space-y-2">
+        <button
+          onClick={() => onSelect(null)}
+          className="w-full flex items-center gap-3 px-4 py-3.5 bg-white/10 hover:bg-white/20 rounded-xl transition-colors text-left"
+        >
+          <Play className="h-5 w-5 text-green-400 shrink-0" />
+          <div>
+            <div className="font-medium">最初から見る</div>
+            <div className="text-xs text-white/50">全編を通して視聴</div>
+          </div>
+        </button>
+        {chapters.map((ch) => (
+          <button
+            key={ch.id}
+            onClick={() => onSelect(ch)}
+            className="w-full flex items-center gap-3 px-4 py-3.5 bg-white/10 hover:bg-white/20 rounded-xl transition-colors text-left"
+          >
+            <Play className="h-5 w-5 text-blue-400 shrink-0" />
+            <div>
+              <div className="font-medium">{ch.label}</div>
+              <div className="text-xs text-white/50">{fmt(ch.start_sec)}〜</div>
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // 動画の種類を判定するヘルパー
 function getVideoType(v: BriefingVideo): 'youtube' | 'upload' | 'none' {
   if (v.youtube_url && v.youtube_url.trim()) return 'youtube'
@@ -45,35 +89,52 @@ function getVideoType(v: BriefingVideo): 'youtube' | 'upload' | 'none' {
   return 'none'
 }
 
+// 現在のチャプターを判定
+function getCurrentChapter(sec: number, chapters: VideoChapter[]): VideoChapter | null {
+  if (!chapters.length) return null
+  const sorted = [...chapters].sort((a, b) => b.start_sec - a.start_sec)
+  return sorted.find(c => c.start_sec <= sec) || null
+}
+
 export function StudentViewer() {
   const [student, setStudent] = useState<Student | null>(null)
   const [video, setVideo] = useState<BriefingVideo | null>(null)
   const [questions, setQuestions] = useState<SurveyQuestion[]>([])
+  const [chapters, setChapters] = useState<VideoChapter[]>([])
   const [answeredIds, setAnsweredIds] = useState<Set<string>>(new Set())
   const [activeQuestion, setActiveQuestion] = useState<SurveyQuestion | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
   const [completed, setCompleted] = useState(false)
+  // undefined = 未選択（選択画面表示）, null = 最初から見る, VideoChapter = 特定チャプター
+  const [selectedChapter, setSelectedChapter] = useState<VideoChapter | null | undefined>(undefined)
+  const [isFullscreen, setIsFullscreen] = useState(false)
 
   const playerRef = useRef<any>(null)
   const nativeVideoRef = useRef<HTMLVideoElement>(null)
+  const videoContainerRef = useRef<HTMLDivElement>(null)
   const sessionIdRef = useRef<string>(uuidv4())
   const tokenRef = useRef<string | null>(null)
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const surveyCheckRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const prevCheckPosRef = useRef<number>(0)
+  const seekOnReadyRef = useRef<number | null>(null)
 
-  // Ref版で最新stateを参照（useEffectの依存を減らす）
+  // Ref版で最新stateを参照
   const questionsRef = useRef(questions)
   const answeredIdsRef = useRef(answeredIds)
   const activeQuestionRef = useRef(activeQuestion)
   const studentRef = useRef(student)
   const videoRef = useRef(video)
+  const chaptersRef = useRef(chapters)
+  const selectedChapterRef = useRef(selectedChapter)
   questionsRef.current = questions
   answeredIdsRef.current = answeredIds
   activeQuestionRef.current = activeQuestion
   studentRef.current = student
   videoRef.current = video
+  chaptersRef.current = chapters
+  selectedChapterRef.current = selectedChapter
 
   const deviceType = (() => {
     const ua = navigator.userAgent
@@ -86,7 +147,6 @@ export function StudentViewer() {
     try {
       const s = studentRef.current, v = videoRef.current
       if (!s || !v) return
-      // 1) トークンベース RPC を試行
       const t = tokenRef.current
       if (t) {
         try {
@@ -100,7 +160,6 @@ export function StudentViewer() {
           console.warn('[recordEvent] RPC threw:', e)
         }
       }
-      // 2) 直接 INSERT（RPC 未作成 or 失敗時）
       const { error: e2 } = await supabase.from('watch_events').insert({
         student_id: s.id, video_id: v.id, event_type: eventType,
         position_sec: positionSec, session_id: sessionIdRef.current, company_id: s.company_id,
@@ -108,7 +167,6 @@ export function StudentViewer() {
       })
       if (!e2) return
       console.warn('[recordEvent] direct insert failed:', e2.message)
-      // 3) device_type カラム未作成の場合のフォールバック
       const { error: e3 } = await supabase.from('watch_events').insert({
         student_id: s.id, video_id: v.id, event_type: eventType,
         position_sec: positionSec, session_id: sessionIdRef.current, company_id: s.company_id,
@@ -119,13 +177,34 @@ export function StudentViewer() {
     }
   }, [deviceType])
 
+  // ─── チャプター対応アンケートトリガー ───
   const checkSurveyTrigger = useCallback((currentTime: number) => {
     if (activeQuestionRef.current) return
     const sec = Math.floor(currentTime)
     const prevSec = prevCheckPosRef.current
     prevCheckPosRef.current = sec
+
+    const currentCh = getCurrentChapter(sec, chaptersRef.current)
+
     for (const q of questionsRef.current) {
       if (answeredIdsRef.current.has(q.id)) continue
+
+      // チャプターフィルタ
+      if (q.chapter_id) {
+        const sel = selectedChapterRef.current
+        if (sel === undefined) continue // まだ選択画面
+        if (sel === null) {
+          // 最初から見る
+          if (videoRef.current?.chapter_survey_mode === 'chapter_only') {
+            if (currentCh?.id !== q.chapter_id) continue
+          }
+          // mode === 'all' → フィルタなし（全表示）
+        } else {
+          // 特定チャプター選択 → そのチャプターの設問のみ
+          if (q.chapter_id !== sel.id) continue
+        }
+      }
+
       if ((sec >= q.trigger_sec && prevSec < q.trigger_sec) ||
           (sec >= q.trigger_sec && Math.abs(sec - prevSec) > 3)) {
         setActiveQuestion(q)
@@ -137,15 +216,13 @@ export function StudentViewer() {
   const startSurveyCheck = useCallback(() => {
     if (surveyCheckRef.current) clearInterval(surveyCheckRef.current)
     surveyCheckRef.current = setInterval(() => {
-      // ネイティブ動画
       if (nativeVideoRef.current && !nativeVideoRef.current.paused) {
         checkSurveyTrigger(nativeVideoRef.current.currentTime)
         return
       }
-      // YouTube
       try {
         const p = playerRef.current
-        if (p?.getPlayerState && p.getPlayerState() === 1) { // 1 = PLAYING
+        if (p?.getPlayerState && p.getPlayerState() === 1) {
           checkSurveyTrigger(p.getCurrentTime())
         }
       } catch { /* player not ready */ }
@@ -156,7 +233,6 @@ export function StudentViewer() {
     const q = activeQuestionRef.current, s = studentRef.current, v = videoRef.current
     if (!q || !v) return
     try {
-      // 1) トークンベース RPC を試行
       const t = tokenRef.current
       if (t) {
         try {
@@ -170,7 +246,6 @@ export function StudentViewer() {
           console.warn('[handleAnswer] RPC threw:', e)
         }
       }
-      // 2) 直接 INSERT フォールバック
       if (s) {
         await supabase.from('survey_responses').insert({
           student_id: s.id, question_id: q.id, video_id: v.id,
@@ -183,6 +258,41 @@ export function StudentViewer() {
     setAnsweredIds((prev) => new Set([...prev, q.id]))
     setActiveQuestion(null)
   }
+
+  // ─── チャプター選択ハンドラ ───
+  const handleChapterSelect = (ch: VideoChapter | null) => {
+    setSelectedChapter(ch)
+    const startSec = ch?.start_sec ?? 0
+    if (startSec > 0) {
+      seekOnReadyRef.current = startSec
+      prevCheckPosRef.current = startSec
+      // ネイティブ動画: 即座にシーク
+      if (nativeVideoRef.current) {
+        nativeVideoRef.current.currentTime = startSec
+      }
+      // YouTube: onReady で seekTo（playerRef がまだない場合は seekOnReadyRef で待機）
+      if (playerRef.current?.seekTo) {
+        playerRef.current.seekTo(startSec, true)
+      }
+    }
+  }
+
+  // ─── フルスクリーン ───
+  const toggleFullscreen = async () => {
+    const container = videoContainerRef.current
+    if (!container) return
+    if (document.fullscreenElement) {
+      await document.exitFullscreen()
+    } else {
+      await container.requestFullscreen()
+    }
+  }
+
+  useEffect(() => {
+    const handler = () => setIsFullscreen(!!document.fullscreenElement)
+    document.addEventListener('fullscreenchange', handler)
+    return () => document.removeEventListener('fullscreenchange', handler)
+  }, [])
 
   // ─── 初期化 ───
   useEffect(() => {
@@ -199,7 +309,6 @@ export function StudentViewer() {
       }
       setStudent(sd)
 
-      // company_idで動画を取得、見つからなければcompany_idなしで全公開動画から取得
       let vdQuery = supabase.from('briefing_videos').select('*').eq('is_published', true)
         .order('created_at', { ascending: false }).limit(1)
       if (sd.company_id) {
@@ -212,8 +321,15 @@ export function StudentViewer() {
         setError('現在公開中の説明会動画はありません。\n管理画面で動画を「公開」に設定してください。')
         setLoading(false); return
       }
-      console.log('[StudentViewer] video loaded:', vd.id, 'type:', vd.youtube_url ? 'youtube' : 'upload', 'youtube_url:', vd.youtube_url, 'video_url:', vd.video_url)
       setVideo(vd)
+
+      // チャプター取得
+      const { data: chData } = await supabase.from('video_chapters').select('*')
+        .eq('video_id', vd.id).order('sort_order', { ascending: true })
+      const chList = chData || []
+      setChapters(chList)
+      // チャプターが無い場合は選択画面をスキップ
+      if (chList.length === 0) setSelectedChapter(null)
 
       const { data: qd } = await supabase.from('survey_questions').select('*')
         .eq('video_id', vd.id).order('trigger_sec', { ascending: true })
@@ -226,7 +342,6 @@ export function StudentViewer() {
     }
     init()
 
-    // 動画追加/公開の即時反映
     const ch = supabase.channel('video-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'briefing_videos' }, () => window.location.reload())
       .subscribe()
@@ -235,7 +350,7 @@ export function StudentViewer() {
 
   // ─── ネイティブ動画のイベント ───
   useEffect(() => {
-    if (!video || getVideoType(video) !== 'upload') return
+    if (!video || getVideoType(video) !== 'upload' || selectedChapter === undefined) return
     const el = nativeVideoRef.current
     if (!el) return
     const onLoadedMetadata = async () => {
@@ -246,6 +361,11 @@ export function StudentViewer() {
           await supabase.from('briefing_videos').update({ duration_sec: dur })
             .eq('id', videoRef.current.id).is('duration_sec', null)
         }
+      }
+      // チャプター選択時のシーク
+      if (seekOnReadyRef.current !== null) {
+        el.currentTime = seekOnReadyRef.current
+        seekOnReadyRef.current = null
       }
     }
     const onPlay = () => {
@@ -271,11 +391,11 @@ export function StudentViewer() {
       if (heartbeatRef.current) clearInterval(heartbeatRef.current)
       if (surveyCheckRef.current) clearInterval(surveyCheckRef.current)
     }
-  }, [video?.id, recordEvent, startSurveyCheck])
+  }, [video?.id, selectedChapter !== undefined, recordEvent, startSurveyCheck])
 
   // ─── YouTube Player 初期化 ───
   useEffect(() => {
-    if (!video || getVideoType(video) !== 'youtube') return
+    if (!video || getVideoType(video) !== 'youtube' || selectedChapter === undefined) return
     const youtubeId = extractYouTubeId(video.youtube_url)
     if (!youtubeId) {
       console.error('[YT] Could not extract YouTube ID from:', video.youtube_url)
@@ -286,11 +406,10 @@ export function StudentViewer() {
 
     const createPlayer = () => {
       if (destroyed) return
-      if (playerRef.current) return // 既に生成済み
+      if (playerRef.current) return
       const container = document.getElementById('yt-player')
       if (!container) return
 
-      console.log('[YT] Creating player for:', youtubeId)
       playerRef.current = new (window as any).YT.Player('yt-player', {
         videoId: youtubeId,
         width: '100%',
@@ -298,7 +417,6 @@ export function StudentViewer() {
         playerVars: { rel: 0, modestbranding: 1, playsinline: 1 },
         events: {
           onReady: async (event: any) => {
-            console.log('[YT] Player ready')
             const dur = event.target?.getDuration?.()
             if (dur && dur > 0 && videoRef.current) {
               const rounded = Math.round(dur)
@@ -307,6 +425,11 @@ export function StudentViewer() {
                 await supabase.from('briefing_videos').update({ duration_sec: rounded })
                   .eq('id', videoRef.current.id).is('duration_sec', null)
               }
+            }
+            // チャプター選択時のシーク
+            if (seekOnReadyRef.current !== null) {
+              event.target.seekTo(seekOnReadyRef.current, true)
+              seekOnReadyRef.current = null
             }
           },
           onStateChange: (event: any) => {
@@ -334,14 +457,12 @@ export function StudentViewer() {
       })
     }
 
-    // IFrame APIスクリプトを挿入
     if (!document.querySelector('script[src*="youtube.com/iframe_api"]')) {
       const tag = document.createElement('script')
       tag.src = 'https://www.youtube.com/iframe_api'
       document.head.appendChild(tag)
     }
 
-    // YT API + DOM の両方が揃うまでポーリング（200ms間隔、最大15秒）
     const poll = setInterval(() => {
       if (destroyed) { clearInterval(poll); return }
       if ((window as any).YT?.Player && document.getElementById('yt-player')) {
@@ -360,7 +481,7 @@ export function StudentViewer() {
       }
       playerRef.current = null
     }
-  }, [video?.id, recordEvent, startSurveyCheck])
+  }, [video?.id, selectedChapter !== undefined, recordEvent, startSurveyCheck])
 
   if (loading) {
     return (
@@ -388,6 +509,7 @@ export function StudentViewer() {
   if (!student || !video) return null
 
   const videoType = getVideoType(video)
+  const showChapterSelect = chapters.length > 0 && selectedChapter === undefined
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -399,16 +521,32 @@ export function StudentViewer() {
       </header>
 
       <main className="max-w-4xl mx-auto px-6 py-8">
-        <div className="relative rounded-xl overflow-hidden bg-black aspect-video shadow-lg">
-          {videoType === 'upload' ? (
-            <video ref={nativeVideoRef} src={video.video_url!} controls className="w-full h-full" />
-          ) : videoType === 'youtube' ? (
-            <div id="yt-player" className="w-full h-full" />
+        <div
+          ref={videoContainerRef}
+          className={`relative rounded-xl overflow-hidden bg-black shadow-lg ${isFullscreen ? 'w-screen h-screen' : 'aspect-video'}`}
+        >
+          {showChapterSelect ? (
+            <ChapterSelect chapters={chapters} videoTitle={video.title} onSelect={handleChapterSelect} />
           ) : (
-            <div className="w-full h-full flex items-center justify-center text-white/60">動画を準備中です</div>
-          )}
-          {activeQuestion && (
-            <SurveyOverlay question={activeQuestion} onAnswer={handleAnswer} />
+            <>
+              {videoType === 'upload' ? (
+                <video ref={nativeVideoRef} src={video.video_url!} controls playsInline className="w-full h-full [&::-webkit-media-controls-fullscreen-button]:hidden" />
+              ) : videoType === 'youtube' ? (
+                <div id="yt-player" className="w-full h-full" />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center text-white/60">動画を準備中です</div>
+              )}
+              {activeQuestion && (
+                <SurveyOverlay question={activeQuestion} onAnswer={handleAnswer} />
+              )}
+              {/* カスタム全画面ボタン */}
+              <button
+                onClick={toggleFullscreen}
+                className="absolute bottom-3 right-3 z-20 p-2 bg-black/50 hover:bg-black/70 rounded-lg text-white transition-colors"
+              >
+                {isFullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
+              </button>
+            </>
           )}
         </div>
 
