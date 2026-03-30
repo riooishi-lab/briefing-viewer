@@ -661,7 +661,7 @@ function SurveysTab({ companyId }: { companyId: string }) {
                 qResponses.forEach((r) => (choiceCounts[r.selected_choice] = (choiceCounts[r.selected_choice] || 0) + 1))
                 const total = qResponses.length
                 const linkedChapter = chapters.find(ch => ch.id === q.chapter_id)
-                const relativeSec = linkedChapter ? q.trigger_sec - linkedChapter.start_sec : q.trigger_sec
+                const relativeSec = linkedChapter ? Math.max(0, q.trigger_sec - linkedChapter.start_sec) : q.trigger_sec
 
                 return (
                   <div key={q.id} className="bg-white rounded-xl border p-5 space-y-3">
