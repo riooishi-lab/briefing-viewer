@@ -479,8 +479,8 @@ export function StudentViewer() {
         .eq('video_id', vd.id).order('sort_order', { ascending: true })
       const chList = chData || []
       setChapters(chList)
-      // チャプターが無い or 表示モード none の場合は選択画面をスキップ
-      if (chList.length === 0 || vd.chapter_display_mode === 'none') setSelectedChapter(null)
+      // チャプターが無い / none / image の場合は選択画面をスキップ（imageは動画下にグリッド表示）
+      if (chList.length === 0 || vd.chapter_display_mode !== 'text') setSelectedChapter(null)
 
       // 有効なアンケートセットの設問のみ取得
       const { data: setData } = await supabase.from('survey_sets').select('*')
@@ -675,7 +675,8 @@ export function StudentViewer() {
 
   const videoType = getVideoType(video)
   const displayMode = video.chapter_display_mode || 'text'
-  const showChapterSelect = displayMode !== 'none' && chapters.length > 0 && selectedChapter === undefined
+  // テキストモードのみ選択画面を挟む。画像モードは動画の下にグリッド配置。
+  const showChapterSelect = displayMode === 'text' && chapters.length > 0 && selectedChapter === undefined
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -692,9 +693,7 @@ export function StudentViewer() {
           className={`relative rounded-xl overflow-hidden bg-black shadow-lg ${isFullscreen ? 'w-screen h-screen' : 'aspect-video'}`}
         >
           {showChapterSelect ? (
-            displayMode === 'image'
-              ? <ChapterSelectImage chapters={chapters} videoTitle={video.title} onSelect={handleChapterSelect} />
-              : <ChapterSelectText chapters={chapters} videoTitle={video.title} onSelect={handleChapterSelect} />
+            <ChapterSelectText chapters={chapters} videoTitle={video.title} onSelect={handleChapterSelect} />
           ) : (
             <>
               {videoType === 'upload' ? (
@@ -727,6 +726,37 @@ export function StudentViewer() {
           <h2 className="text-2xl font-bold text-gray-800">{video.title}</h2>
           {video.description && <p className="text-gray-600">{video.description}</p>}
         </div>
+
+        {/* 画像モード: 動画の下にサムネイルグリッド */}
+        {displayMode === 'image' && chapters.length > 0 && (
+          <div className="mt-6">
+            <p className="text-sm font-medium text-gray-500 mb-3">パートから選んで視聴</p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              {chapters.map((ch) => (
+                <button key={ch.id} onClick={() => handleChapterSelect(ch)}
+                  className="relative rounded-xl overflow-hidden bg-gray-900 hover:ring-2 hover:ring-[#1B2A4A] transition-all group aspect-video">
+                  {ch.thumbnail_url ? (
+                    <img src={ch.thumbnail_url} alt={ch.label} className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center bg-gray-200">
+                      <Play className="h-8 w-8 text-gray-400" />
+                    </div>
+                  )}
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
+                  <div className="absolute bottom-0 left-0 right-0 p-2.5">
+                    <p className="text-sm font-medium text-white">{ch.label}</p>
+                    <p className="text-xs text-white/60">{Math.floor(ch.start_sec / 60)}:{String(ch.start_sec % 60).padStart(2, '0')}〜</p>
+                  </div>
+                  <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="w-12 h-12 bg-white/25 rounded-full flex items-center justify-center backdrop-blur-sm">
+                      <Play className="h-6 w-6 text-white ml-0.5" />
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {completed && (
           <div className="mt-8 bg-green-50 border border-green-200 rounded-xl p-6 text-center">
