@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import type { Student, BriefingVideo, SurveyQuestion, SurveySet, VideoChapter } from '../lib/supabase'
 import { v4 as uuidv4 } from 'uuid'
-import { AlertCircle, CheckCircle2, Play, Maximize, Minimize } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Play, Pause, Maximize, Minimize, Volume2, VolumeX } from 'lucide-react'
 
 const extractYouTubeId = (url: string | null | undefined): string | null => {
   if (!url) return null
@@ -83,6 +83,119 @@ function ChapterSelect({
 }
 
 // 動画の種類を判定するヘルパー
+// ─── YouTube風カスタムコントロール ───
+function VideoControls({
+  videoRef, isFullscreen, onToggleFullscreen,
+}: {
+  videoRef: React.RefObject<HTMLVideoElement | null>
+  isFullscreen: boolean
+  onToggleFullscreen: () => void
+}) {
+  const [playing, setPlaying] = useState(false)
+  const [currentTime, setCurrentTime] = useState(0)
+  const [duration, setDuration] = useState(0)
+  const [muted, setMuted] = useState(false)
+  const [showControls, setShowControls] = useState(true)
+  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const fmt = (s: number) => {
+    const m = Math.floor(s / 60)
+    const sec = Math.floor(s % 60)
+    return `${m}:${String(sec).padStart(2, '0')}`
+  }
+
+  const resetHideTimer = () => {
+    setShowControls(true)
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current)
+    hideTimerRef.current = setTimeout(() => { if (videoRef.current && !videoRef.current.paused) setShowControls(false) }, 3000)
+  }
+
+  useEffect(() => {
+    const el = videoRef.current
+    if (!el) return
+    const onPlay = () => { setPlaying(true); resetHideTimer() }
+    const onPause = () => { setPlaying(false); setShowControls(true) }
+    const onTime = () => setCurrentTime(el.currentTime)
+    const onMeta = () => setDuration(el.duration || 0)
+    el.addEventListener('play', onPlay)
+    el.addEventListener('pause', onPause)
+    el.addEventListener('timeupdate', onTime)
+    el.addEventListener('loadedmetadata', onMeta)
+    if (el.duration) setDuration(el.duration)
+    return () => {
+      el.removeEventListener('play', onPlay)
+      el.removeEventListener('pause', onPause)
+      el.removeEventListener('timeupdate', onTime)
+      el.removeEventListener('loadedmetadata', onMeta)
+    }
+  }, [videoRef.current])
+
+  const togglePlay = () => {
+    const el = videoRef.current
+    if (!el) return
+    el.paused ? el.play() : el.pause()
+  }
+
+  const toggleMute = () => {
+    const el = videoRef.current
+    if (!el) return
+    el.muted = !el.muted
+    setMuted(el.muted)
+  }
+
+  const seek = (e: React.MouseEvent<HTMLDivElement>) => {
+    const el = videoRef.current
+    if (!el || !duration) return
+    const rect = e.currentTarget.getBoundingClientRect()
+    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+    el.currentTime = pct * duration
+  }
+
+  const progress = duration > 0 ? (currentTime / duration) * 100 : 0
+
+  return (
+    <div
+      className="absolute inset-0 z-[5] flex flex-col justify-end"
+      onMouseMove={resetHideTimer}
+      onTouchStart={resetHideTimer}
+      onClick={(e) => { if (e.target === e.currentTarget) togglePlay() }}
+    >
+      {/* 中央再生ボタン（一時停止中のみ） */}
+      {!playing && (
+        <button onClick={togglePlay} className="absolute inset-0 flex items-center justify-center">
+          <div className="w-16 h-16 bg-black/60 rounded-full flex items-center justify-center">
+            <Play className="h-8 w-8 text-white ml-1" />
+          </div>
+        </button>
+      )}
+
+      {/* 下部コントロールバー */}
+      <div className={`bg-gradient-to-t from-black/80 to-transparent px-4 pb-3 pt-10 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0'}`}>
+        {/* シークバー */}
+        <div className="w-full h-1 bg-white/30 rounded-full cursor-pointer mb-3 group" onClick={seek}>
+          <div className="h-full bg-red-600 rounded-full relative transition-all" style={{ width: `${progress}%` }}>
+            <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-red-600 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
+          </div>
+        </div>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <button onClick={togglePlay} className="text-white hover:text-white/80">
+              {playing ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
+            </button>
+            <button onClick={toggleMute} className="text-white hover:text-white/80">
+              {muted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
+            </button>
+            <span className="text-white text-xs font-mono">{fmt(currentTime)} / {fmt(duration)}</span>
+          </div>
+          <button onClick={onToggleFullscreen} className="text-white hover:text-white/80">
+            {isFullscreen ? <Minimize className="h-5 w-5" /> : <Maximize className="h-5 w-5" />}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function getVideoType(v: BriefingVideo): 'youtube' | 'upload' | 'none' {
   if (v.youtube_url && v.youtube_url.trim()) return 'youtube'
   if (v.video_url && v.video_url.trim()) return 'upload'
@@ -548,7 +661,10 @@ export function StudentViewer() {
           ) : (
             <>
               {videoType === 'upload' ? (
-                <video ref={nativeVideoRef} src={video.video_url!} controls playsInline className="w-full h-full [&::-webkit-media-controls-fullscreen-button]:hidden" />
+                <>
+                  <video ref={nativeVideoRef} src={video.video_url!} playsInline className="w-full h-full" />
+                  <VideoControls videoRef={nativeVideoRef} isFullscreen={isFullscreen} onToggleFullscreen={toggleFullscreen} />
+                </>
               ) : videoType === 'youtube' ? (
                 <div id="yt-player" className="w-full h-full" />
               ) : (
@@ -557,13 +673,15 @@ export function StudentViewer() {
               {activeQuestion && (
                 <SurveyOverlay question={activeQuestion} onAnswer={handleAnswer} />
               )}
-              {/* カスタム全画面ボタン */}
-              <button
-                onClick={toggleFullscreen}
-                className="absolute bottom-3 right-3 z-20 p-2 bg-black/50 hover:bg-black/70 rounded-lg text-white transition-colors"
-              >
-                {isFullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
-              </button>
+              {/* YouTube: 全画面ボタンのみ（プレーヤーUIはYouTube側で提供） */}
+              {videoType === 'youtube' && (
+                <button
+                  onClick={toggleFullscreen}
+                  className="absolute bottom-3 right-3 z-20 p-2 bg-black/50 hover:bg-black/70 rounded-lg text-white transition-colors"
+                >
+                  {isFullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
+                </button>
+              )}
             </>
           )}
         </div>
