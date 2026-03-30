@@ -6,7 +6,7 @@ import { toast } from 'sonner'
 import {
   Video, Users, BarChart3, ClipboardList, LogOut, Plus, Trash2,
   Copy, Link, Clock, CheckCircle2, XCircle, Play, Upload, Download, Loader2,
-  Monitor, Smartphone, Tablet, Layers, Menu, X
+  Monitor, Smartphone, Tablet, Layers, Menu, X, Image
 } from 'lucide-react'
 
 type Tab = 'videos' | 'students' | 'chapters' | 'surveys' | 'logs'
@@ -421,8 +421,10 @@ function ChaptersTab({ companyId }: { companyId: string }) {
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null)
   const [chLabel, setChLabel] = useState('')
   const [chStartSec, setChStartSec] = useState('')
+  const [uploading, setUploading] = useState<string | null>(null) // chapter id being uploaded
 
   const selectedVideo = videos.find(v => v.id === selectedVideoId) || null
+  const displayMode = selectedVideo?.chapter_display_mode || 'text'
   const fmt = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 
   const fetchAll = useCallback(async () => {
@@ -459,10 +461,29 @@ function ChaptersTab({ companyId }: { companyId: string }) {
     fetchChapters()
   }
 
+  const updateDisplayMode = async (mode: 'none' | 'text' | 'image') => {
+    if (!selectedVideoId) return
+    await supabase.from('briefing_videos').update({ chapter_display_mode: mode }).eq('id', selectedVideoId)
+    setVideos(prev => prev.map(v => v.id === selectedVideoId ? { ...v, chapter_display_mode: mode } : v))
+  }
+
   const updateSurveyMode = async (mode: 'all' | 'chapter_only') => {
     if (!selectedVideoId) return
     await supabase.from('briefing_videos').update({ chapter_survey_mode: mode }).eq('id', selectedVideoId)
     setVideos(prev => prev.map(v => v.id === selectedVideoId ? { ...v, chapter_survey_mode: mode } : v))
+  }
+
+  const uploadThumbnail = async (chapterId: string, file: File) => {
+    setUploading(chapterId)
+    const ext = file.name.split('.').pop() || 'jpg'
+    const path = `${companyId}/chapters/${chapterId}.${ext}`
+    const { error: upErr } = await supabase.storage.from('videos').upload(path, file, { contentType: file.type, upsert: true })
+    if (upErr) { toast.error('アップロード失敗'); setUploading(null); return }
+    const { data: urlData } = supabase.storage.from('videos').getPublicUrl(path)
+    await supabase.from('video_chapters').update({ thumbnail_url: urlData.publicUrl }).eq('id', chapterId)
+    toast.success('サムネイルを設定しました')
+    setUploading(null)
+    fetchChapters()
   }
 
   if (loading) return <p className="text-gray-400 text-center py-8">読み込み中...</p>
@@ -479,53 +500,100 @@ function ChaptersTab({ companyId }: { companyId: string }) {
       </div>
 
       {selectedVideoId && (
-        <div className="bg-white rounded-xl border p-6 space-y-4">
-          <h3 className="font-bold text-gray-800">パート（チャプター）設定</h3>
-          <p className="text-xs text-gray-400">学生が視聴前にパートを選べるようになります。パートを追加しない場合は通常の視聴画面になります。</p>
-          <div className="flex gap-2 items-end">
-            <div className="flex-1">
-              <label className="text-xs text-gray-500">ラベル</label>
-              <input placeholder="例: 会社概要" value={chLabel} onChange={e => setChLabel(e.target.value)}
-                className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1B2A4A]" />
-            </div>
-            <div className="w-32">
-              <label className="text-xs text-gray-500">開始秒</label>
-              <input type="number" value={chStartSec} onChange={e => setChStartSec(e.target.value)}
-                placeholder="0" className="w-full px-3 py-2 border rounded-lg text-sm" min={0} />
-            </div>
-            <button onClick={addChapter} disabled={!chLabel}
-              className="px-4 py-2 bg-[#1B2A4A] text-white rounded-lg text-sm font-medium hover:bg-[#0F1D35] disabled:opacity-40 shrink-0">
-              追加
-            </button>
-          </div>
-          {chapters.length > 0 && (
-            <div className="space-y-1">
-              {chapters.map((ch, i) => (
-                <div key={ch.id} className="flex items-center justify-between px-3 py-2 bg-gray-50 rounded-lg">
-                  <span className="text-sm"><span className="text-gray-400 mr-2">{i + 1}.</span>{ch.label} <span className="text-xs text-gray-400 ml-1">{fmt(ch.start_sec)}〜</span></span>
-                  <button onClick={() => deleteChapter(ch.id)} className="text-red-400 hover:text-red-600"><Trash2 className="h-3.5 w-3.5" /></button>
-                </div>
+        <>
+          {/* 表示モード */}
+          <div className="bg-white rounded-xl border p-6 space-y-4">
+            <h3 className="font-bold text-gray-800">視聴画面の表示モード</h3>
+            <div className="grid grid-cols-3 gap-3">
+              {([
+                { key: 'none' as const, label: '設定なし', desc: '最初から再生のみ' },
+                { key: 'text' as const, label: 'テキスト', desc: '文字でパート選択' },
+                { key: 'image' as const, label: '画像', desc: 'サムネイルで選択' },
+              ]).map(m => (
+                <button key={m.key} onClick={() => updateDisplayMode(m.key)}
+                  className={`p-4 rounded-xl border-2 text-left transition-colors ${displayMode === m.key ? 'border-[#1B2A4A] bg-[#1B2A4A]/5' : 'border-gray-200 hover:border-gray-300'}`}>
+                  <div className="text-sm font-medium">{m.label}</div>
+                  <div className="text-xs text-gray-400 mt-1">{m.desc}</div>
+                </button>
               ))}
             </div>
-          )}
-          {chapters.length > 0 && (
-            <div className="border-t pt-4">
-              <label className="text-xs text-gray-500 block mb-2">「最初から見る」を選んだ時のアンケート表示</label>
-              <div className="flex gap-4">
-                <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input type="radio" name="surveyMode" checked={selectedVideo?.chapter_survey_mode !== 'chapter_only'}
-                    onChange={() => updateSurveyMode('all')} className="accent-[#1B2A4A]" />
-                  すべて表示
-                </label>
-                <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input type="radio" name="surveyMode" checked={selectedVideo?.chapter_survey_mode === 'chapter_only'}
-                    onChange={() => updateSurveyMode('chapter_only')} className="accent-[#1B2A4A]" />
-                  パート紐付け分のみ
-                </label>
+          </div>
+
+          {/* パート追加・一覧（none以外） */}
+          {displayMode !== 'none' && (
+            <div className="bg-white rounded-xl border p-6 space-y-4">
+              <h3 className="font-bold text-gray-800">パート（チャプター）設定</h3>
+              <div className="flex gap-2 items-end">
+                <div className="flex-1">
+                  <label className="text-xs text-gray-500">ラベル</label>
+                  <input placeholder="例: 会社概要" value={chLabel} onChange={e => setChLabel(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1B2A4A]" />
+                </div>
+                <div className="w-32">
+                  <label className="text-xs text-gray-500">開始秒</label>
+                  <input type="number" value={chStartSec} onChange={e => setChStartSec(e.target.value)}
+                    placeholder="0" className="w-full px-3 py-2 border rounded-lg text-sm" min={0} />
+                </div>
+                <button onClick={addChapter} disabled={!chLabel}
+                  className="px-4 py-2 bg-[#1B2A4A] text-white rounded-lg text-sm font-medium hover:bg-[#0F1D35] disabled:opacity-40 shrink-0">
+                  追加
+                </button>
               </div>
+
+              {chapters.length > 0 && (
+                <div className="space-y-2">
+                  {chapters.map((ch, i) => (
+                    <div key={ch.id} className="flex items-center gap-3 px-3 py-2 bg-gray-50 rounded-lg">
+                      {/* サムネイル（画像モード時） */}
+                      {displayMode === 'image' && (
+                        <div className="w-20 h-12 rounded overflow-hidden bg-gray-200 shrink-0 relative">
+                          {ch.thumbnail_url ? (
+                            <img src={ch.thumbnail_url} alt="" className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-gray-400">
+                              <Image className="h-4 w-4" />
+                            </div>
+                          )}
+                          <label className="absolute inset-0 cursor-pointer opacity-0 hover:opacity-100 bg-black/40 flex items-center justify-center text-white text-xs transition-opacity">
+                            {uploading === ch.id ? '...' : '変更'}
+                            <input type="file" accept="image/*" className="hidden"
+                              onChange={e => { if (e.target.files?.[0]) uploadThumbnail(ch.id, e.target.files[0]) }} />
+                          </label>
+                        </div>
+                      )}
+                      <span className="flex-1 text-sm">
+                        <span className="text-gray-400 mr-2">{i + 1}.</span>
+                        {ch.label}
+                        <span className="text-xs text-gray-400 ml-1">{fmt(ch.start_sec)}〜</span>
+                      </span>
+                      <button onClick={() => deleteChapter(ch.id)} className="text-red-400 hover:text-red-600 shrink-0">
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {chapters.length > 0 && (
+                <div className="border-t pt-4">
+                  <label className="text-xs text-gray-500 block mb-2">「最初から見る」を選んだ時のアンケート表示</label>
+                  <div className="flex gap-4">
+                    <label className="flex items-center gap-2 text-sm cursor-pointer">
+                      <input type="radio" name="surveyMode" checked={selectedVideo?.chapter_survey_mode !== 'chapter_only'}
+                        onChange={() => updateSurveyMode('all')} className="accent-[#1B2A4A]" />
+                      すべて表示
+                    </label>
+                    <label className="flex items-center gap-2 text-sm cursor-pointer">
+                      <input type="radio" name="surveyMode" checked={selectedVideo?.chapter_survey_mode === 'chapter_only'}
+                        onChange={() => updateSurveyMode('chapter_only')} className="accent-[#1B2A4A]" />
+                      パート紐付け分のみ
+                    </label>
+                  </div>
+                </div>
+              )}
             </div>
           )}
-        </div>
+        </>
       )}
     </div>
   )
