@@ -480,9 +480,9 @@ function ChaptersTab({ companyId }: { companyId: string }) {
     setUploading(chapterId)
     const ext = file.name.split('.').pop() || 'jpg'
     const path = `${companyId}/chapters/${chapterId}.${ext}`
-    const { error: upErr } = await supabase.storage.from('videos').upload(path, file, { contentType: file.type, upsert: true })
+    const { error: upErr } = await supabase.storage.from('thumbnails').upload(path, file, { contentType: file.type, upsert: true })
     if (upErr) { toast.error(`アップロード失敗: ${upErr.message}`); console.error('[uploadThumbnail]', upErr); setUploading(null); return }
-    const { data: urlData } = supabase.storage.from('videos').getPublicUrl(path)
+    const { data: urlData } = supabase.storage.from('thumbnails').getPublicUrl(path)
     await supabase.from('video_chapters').update({ thumbnail_url: urlData.publicUrl }).eq('id', chapterId)
     toast.success('サムネイルを設定しました')
     setUploading(null)
