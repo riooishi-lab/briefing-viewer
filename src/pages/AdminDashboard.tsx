@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
-import type { BriefingVideo, Student, SurveyQuestion, SurveyResponse } from '../lib/supabase'
+import type { BriefingVideo, Student, SurveyQuestion, SurveyResponse, VideoChapter } from '../lib/supabase'
 import { toast } from 'sonner'
 import {
   Video, Users, BarChart3, ClipboardList, LogOut, Plus, Trash2,
@@ -413,11 +413,12 @@ function StudentsTab({ companyId }: { companyId: string }) {
   )
 }
 
-// ─── アンケート管理 ───
+// ─── アンケート・チャプター管理 ───
 function SurveysTab({ companyId }: { companyId: string }) {
   const [videos, setVideos] = useState<BriefingVideo[]>([])
   const [questions, setQuestions] = useState<SurveyQuestion[]>([])
   const [responses, setResponses] = useState<(SurveyResponse & { student?: Student })[]>([])
+  const [chapters, setChapters] = useState<VideoChapter[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null)
 
@@ -425,6 +426,13 @@ function SurveysTab({ companyId }: { companyId: string }) {
   const [triggerSec, setTriggerSec] = useState(60)
   const [qText, setQText] = useState('')
   const [choices, setChoices] = useState(['', '', '', ''])
+  const [qChapterId, setQChapterId] = useState<string>('')
+
+  // 新規チャプターフォーム
+  const [chLabel, setChLabel] = useState('')
+  const [chStartSec, setChStartSec] = useState(0)
+
+  const selectedVideo = videos.find(v => v.id === selectedVideoId) || null
 
   const fetchAll = useCallback(async () => {
     const { data: vData } = await supabase.from('briefing_videos').select('*').eq('company_id', companyId).order('created_at', { ascending: false })
@@ -435,17 +443,45 @@ function SurveysTab({ companyId }: { companyId: string }) {
 
   useEffect(() => { fetchAll() }, [fetchAll])
 
-  useEffect(() => {
+  const fetchVideoData = useCallback(async () => {
     if (!selectedVideoId) return
-    const fetchQ = async () => {
-      const { data: qData } = await supabase.from('survey_questions').select('*').eq('video_id', selectedVideoId).order('trigger_sec')
-      setQuestions(qData || [])
-      const { data: rData } = await supabase.from('survey_responses').select('*, student:students(name, email)').eq('video_id', selectedVideoId)
-      setResponses(rData || [])
-    }
-    fetchQ()
+    const { data: qData } = await supabase.from('survey_questions').select('*').eq('video_id', selectedVideoId).order('trigger_sec')
+    setQuestions(qData || [])
+    const { data: rData } = await supabase.from('survey_responses').select('*, student:students(name, email)').eq('video_id', selectedVideoId)
+    setResponses(rData || [])
+    const { data: chData } = await supabase.from('video_chapters').select('*').eq('video_id', selectedVideoId).order('sort_order')
+    setChapters(chData || [])
   }, [selectedVideoId])
 
+  useEffect(() => { fetchVideoData() }, [fetchVideoData])
+
+  // ─── チャプター CRUD ───
+  const addChapter = async () => {
+    if (!chLabel || !selectedVideoId) return
+    const { error } = await supabase.from('video_chapters').insert({
+      video_id: selectedVideoId, label: chLabel, start_sec: chStartSec,
+      sort_order: chapters.length, company_id: companyId,
+    })
+    if (error) { toast.error('追加に失敗しました'); return }
+    setChLabel(''); setChStartSec(0)
+    toast.success('パートを追加しました')
+    fetchVideoData()
+  }
+
+  const deleteChapter = async (id: string) => {
+    if (!confirm('このパートを削除しますか？紐付いた設問は「全体」に戻ります。')) return
+    await supabase.from('video_chapters').delete().eq('id', id)
+    toast.success('削除しました')
+    fetchVideoData()
+  }
+
+  const updateSurveyMode = async (mode: 'all' | 'chapter_only') => {
+    if (!selectedVideoId) return
+    await supabase.from('briefing_videos').update({ chapter_survey_mode: mode }).eq('id', selectedVideoId)
+    setVideos(prev => prev.map(v => v.id === selectedVideoId ? { ...v, chapter_survey_mode: mode } : v))
+  }
+
+  // ─── 設問 CRUD ───
   const addQuestion = async () => {
     if (!qText || !selectedVideoId) return
     const validChoices = choices.filter((c) => c.trim())
@@ -453,12 +489,12 @@ function SurveysTab({ companyId }: { companyId: string }) {
     const { error } = await supabase.from('survey_questions').insert({
       video_id: selectedVideoId, trigger_sec: triggerSec, question_text: qText,
       choices: validChoices, company_id: companyId,
+      chapter_id: qChapterId || null,
     })
     if (error) { toast.error('追加に失敗しました'); return }
-    setQText(''); setChoices(['', '', '', '']); setTriggerSec(60)
+    setQText(''); setChoices(['', '', '', '']); setTriggerSec(60); setQChapterId('')
     toast.success('設問を追加しました')
-    const { data: qData } = await supabase.from('survey_questions').select('*').eq('video_id', selectedVideoId).order('trigger_sec')
-    setQuestions(qData || [])
+    fetchVideoData()
   }
 
   const deleteQuestion = async (id: string) => {
@@ -467,6 +503,8 @@ function SurveysTab({ companyId }: { companyId: string }) {
     toast.success('削除しました')
     setQuestions((prev) => prev.filter((q) => q.id !== id))
   }
+
+  const fmt = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 
   if (loading) return <p className="text-gray-400 text-center py-8">読み込み中...</p>
 
@@ -484,7 +522,55 @@ function SurveysTab({ companyId }: { companyId: string }) {
 
       {selectedVideoId && (
         <>
-          {/* 設問追加 */}
+          {/* ─── パート（チャプター）設定 ─── */}
+          <div className="bg-white rounded-xl border p-6 space-y-4">
+            <h3 className="font-bold text-gray-800">パート（チャプター）設定</h3>
+            <div className="flex gap-2 items-end">
+              <div className="flex-1">
+                <label className="text-xs text-gray-500">ラベル</label>
+                <input placeholder="例: 会社概要" value={chLabel} onChange={e => setChLabel(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1B2A4A]" />
+              </div>
+              <div className="w-28">
+                <label className="text-xs text-gray-500">開始秒</label>
+                <input type="number" value={chStartSec} onChange={e => setChStartSec(Number(e.target.value))}
+                  className="w-full px-3 py-2 border rounded-lg text-sm" min={0} />
+              </div>
+              <button onClick={addChapter} disabled={!chLabel}
+                className="px-4 py-2 bg-[#1B2A4A] text-white rounded-lg text-sm font-medium hover:bg-[#0F1D35] disabled:opacity-40 shrink-0">
+                追加
+              </button>
+            </div>
+            {chapters.length > 0 && (
+              <div className="space-y-1">
+                {chapters.map((ch, i) => (
+                  <div key={ch.id} className="flex items-center justify-between px-3 py-2 bg-gray-50 rounded-lg">
+                    <span className="text-sm"><span className="text-gray-400 mr-2">{i + 1}.</span>{ch.label} <span className="text-xs text-gray-400 ml-1">{fmt(ch.start_sec)}〜</span></span>
+                    <button onClick={() => deleteChapter(ch.id)} className="text-red-400 hover:text-red-600"><Trash2 className="h-3.5 w-3.5" /></button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {chapters.length > 0 && (
+              <div className="border-t pt-4">
+                <label className="text-xs text-gray-500 block mb-2">最初から視聴時のアンケート表示</label>
+                <div className="flex gap-4">
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input type="radio" name="surveyMode" checked={selectedVideo?.chapter_survey_mode !== 'chapter_only'}
+                      onChange={() => updateSurveyMode('all')} className="accent-[#1B2A4A]" />
+                    すべて表示
+                  </label>
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input type="radio" name="surveyMode" checked={selectedVideo?.chapter_survey_mode === 'chapter_only'}
+                      onChange={() => updateSurveyMode('chapter_only')} className="accent-[#1B2A4A]" />
+                    パート紐付け分のみ
+                  </label>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ─── 設問追加 ─── */}
           <div className="bg-white rounded-xl border p-6 space-y-4">
             <h3 className="font-bold text-gray-800">アンケート設問を追加</h3>
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -493,7 +579,17 @@ function SurveysTab({ companyId }: { companyId: string }) {
                 <input type="number" value={triggerSec} onChange={(e) => setTriggerSec(Number(e.target.value))}
                   className="w-full px-3 py-2 border rounded-lg text-sm" min={0} />
               </div>
-              <div className="md:col-span-3">
+              <div>
+                <label className="text-xs text-gray-500">パート</label>
+                <select value={qChapterId} onChange={e => setQChapterId(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-lg text-sm bg-white">
+                  <option value="">指定なし（全体）</option>
+                  {chapters.map(ch => (
+                    <option key={ch.id} value={ch.id}>{ch.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="md:col-span-2">
                 <label className="text-xs text-gray-500">質問文</label>
                 <input placeholder="例: この説明で最も興味を持ったポイントは？" value={qText} onChange={(e) => setQText(e.target.value)}
                   className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1B2A4A]" />
@@ -515,7 +611,7 @@ function SurveysTab({ companyId }: { companyId: string }) {
             </button>
           </div>
 
-          {/* 設問一覧 + 回答集計 */}
+          {/* ─── 設問一覧 + 回答集計 ─── */}
           {questions.length === 0 ? (
             <div className="text-center py-8 text-gray-400">
               <ClipboardList className="h-10 w-10 mx-auto mb-2 opacity-40" />
@@ -529,21 +625,28 @@ function SurveysTab({ companyId }: { companyId: string }) {
                 ;(q.choices as string[]).forEach((c) => (choiceCounts[c] = 0))
                 qResponses.forEach((r) => (choiceCounts[r.selected_choice] = (choiceCounts[r.selected_choice] || 0) + 1))
                 const total = qResponses.length
+                const linkedChapter = chapters.find(ch => ch.id === q.chapter_id)
 
                 return (
                   <div key={q.id} className="bg-white rounded-xl border p-5 space-y-3">
                     <div className="flex items-start justify-between">
                       <div>
-                        <span className="text-xs bg-[#1B2A4A]/10 text-[#1B2A4A] px-2 py-0.5 rounded-full font-medium">
-                          {Math.floor(q.trigger_sec / 60)}:{String(q.trigger_sec % 60).padStart(2, '0')} 後に表示
-                        </span>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs bg-[#1B2A4A]/10 text-[#1B2A4A] px-2 py-0.5 rounded-full font-medium">
+                            {fmt(q.trigger_sec)} 後に表示
+                          </span>
+                          {linkedChapter && (
+                            <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">
+                              {linkedChapter.label}
+                            </span>
+                          )}
+                        </div>
                         <p className="font-bold text-gray-800 mt-2">{q.question_text}</p>
                       </div>
                       <button onClick={() => deleteQuestion(q.id)} className="text-red-400 hover:text-red-600 shrink-0">
                         <Trash2 className="h-4 w-4" />
                       </button>
                     </div>
-                    {/* 回答集計バー */}
                     <div className="space-y-2">
                       {Object.entries(choiceCounts).map(([choice, count]) => {
                         const pct = total > 0 ? (count / total) * 100 : 0
@@ -919,6 +1022,7 @@ type SessionEntry = {
   first_at: number; last_at: number; ended: boolean; last_position: number;
   device_type: string; video_duration_sec: number;
   student_id: string; video_id: string;
+  response_count: number; question_count: number;
 }
 
 type Preset = '今日' | '今週' | '今月' | '全期間' | 'カスタム'
@@ -948,21 +1052,34 @@ function LogsTab({ companyId }: { companyId: string }) {
   const [selectedLog, setSelectedLog] = useState<{ studentId: string; videoId: string; studentName: string } | null>(null)
 
   const fetchLogs = useCallback(async () => {
-    const { data: events, error } = await supabase
-      .from('watch_events')
-      .select('*, student:students(name, email), video:briefing_videos(title, duration_sec)')
-      .eq('company_id', companyId)
-      .order('created_at', { ascending: false })
-      .limit(10000)
+    const [{ data: events, error }, { data: respData }, { data: qData }] = await Promise.all([
+      supabase.from('watch_events')
+        .select('*, student:students(name, email), video:briefing_videos(title, duration_sec)')
+        .eq('company_id', companyId).order('created_at', { ascending: false }).limit(10000),
+      supabase.from('survey_responses').select('student_id, video_id').eq('company_id', companyId),
+      supabase.from('survey_questions').select('id, video_id').eq('company_id', companyId),
+    ])
     if (error) console.error('[LogsTab] fetch failed:', error.message)
-
     if (!events) { setLoading(false); return }
+
+    // 学生×動画ごとの回答数を集計
+    const respCountMap: Record<string, number> = {}
+    ;(respData || []).forEach((r: any) => {
+      const key = `${r.student_id}_${r.video_id}`
+      respCountMap[key] = (respCountMap[key] || 0) + 1
+    })
+    // 動画ごとの設問数
+    const qCountMap: Record<string, number> = {}
+    ;(qData || []).forEach((q: any) => {
+      qCountMap[q.video_id] = (qCountMap[q.video_id] || 0) + 1
+    })
 
     const sessions: Record<string, SessionEntry> = {}
     events.forEach((e: any) => {
       const sid = e.session_id || e.id
       const t = new Date(e.created_at).getTime()
       if (!sessions[sid]) {
+        const rKey = `${e.student_id}_${e.video_id}`
         sessions[sid] = {
           student_name: e.student?.name || '不明',
           student_email: e.student?.email || '',
@@ -972,6 +1089,8 @@ function LogsTab({ companyId }: { companyId: string }) {
           video_duration_sec: e.video?.duration_sec || 0,
           student_id: e.student_id,
           video_id: e.video_id,
+          response_count: respCountMap[rKey] || 0,
+          question_count: qCountMap[e.video_id] || 0,
         }
       }
       if (t < sessions[sid].first_at) {
@@ -1037,6 +1156,8 @@ function LogsTab({ companyId }: { companyId: string }) {
         watch_sec: watchSec,
         device_type: s.device_type,
         completed: true,
+        response_count: s.response_count,
+        question_count: s.question_count,
       }
     })
     .sort((a, b) => new Date(b.played_at).getTime() - new Date(a.played_at).getTime())
@@ -1126,6 +1247,7 @@ function LogsTab({ companyId }: { companyId: string }) {
                   <th className="text-left px-4 py-3 font-medium text-gray-600">視聴日時</th>
                   <th className="text-left px-4 py-3 font-medium text-gray-600">視聴時間</th>
                   <th className="text-left px-4 py-3 font-medium text-gray-600">視聴端末</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">回答</th>
                   <th className="text-left px-4 py-3 font-medium text-gray-600">完了</th>
                 </tr>
               </thead>
@@ -1153,6 +1275,15 @@ function LogsTab({ companyId }: { companyId: string }) {
                         {deviceLabel ? (
                           <span className="inline-flex items-center gap-1.5 text-gray-600">
                             {deviceLabel.icon}{deviceLabel.label}
+                          </span>
+                        ) : (
+                          <span className="text-gray-300">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        {log.question_count > 0 ? (
+                          <span className={`text-xs font-medium ${log.response_count >= log.question_count ? 'text-green-600' : log.response_count > 0 ? 'text-amber-600' : 'text-gray-400'}`}>
+                            {log.response_count}/{log.question_count}
                           </span>
                         ) : (
                           <span className="text-gray-300">—</span>

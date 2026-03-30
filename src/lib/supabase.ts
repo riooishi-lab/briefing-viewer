@@ -48,6 +48,7 @@ export interface BriefingVideo {
   video_url: string | null
   duration_sec: number | null
   is_published: boolean
+  chapter_survey_mode: 'all' | 'chapter_only'
   company_id: string
   created_at: string
 }
@@ -71,6 +72,17 @@ export interface SurveyQuestion {
   trigger_sec: number
   question_text: string
   choices: string[]  // JSONB → string[]
+  chapter_id: string | null
+  company_id: string
+  created_at: string
+}
+
+export interface VideoChapter {
+  id: string
+  video_id: string
+  label: string
+  start_sec: number
+  sort_order: number
   company_id: string
   created_at: string
 }
