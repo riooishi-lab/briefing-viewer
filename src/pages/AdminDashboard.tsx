@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
-import type { BriefingVideo, Student, SurveyQuestion, SurveyResponse, VideoChapter } from '../lib/supabase'
+import type { BriefingVideo, Student, SurveyQuestion, SurveyResponse, SurveySet, VideoChapter } from '../lib/supabase'
 import { toast } from 'sonner'
 import {
   Video, Users, BarChart3, ClipboardList, LogOut, Plus, Trash2,
@@ -531,21 +531,29 @@ function ChaptersTab({ companyId }: { companyId: string }) {
   )
 }
 
-// ─── アンケート管理 ───
+// ─── アンケート管理（セット単位） ───
 function SurveysTab({ companyId }: { companyId: string }) {
   const [videos, setVideos] = useState<BriefingVideo[]>([])
+  const [sets, setSets] = useState<SurveySet[]>([])
   const [questions, setQuestions] = useState<SurveyQuestion[]>([])
   const [responses, setResponses] = useState<(SurveyResponse & { student?: Student })[]>([])
   const [chapters, setChapters] = useState<VideoChapter[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null)
+  const [selectedSetId, setSelectedSetId] = useState<string | null>(null)
 
+  // 新規セットフォーム
+  const [newSetName, setNewSetName] = useState('')
+  const [copyFromSetId, setCopyFromSetId] = useState<string>('')
+
+  // 新規設問フォーム
   const [triggerSec, setTriggerSec] = useState('')
   const [qText, setQText] = useState('')
   const [choices, setChoices] = useState(['', '', '', ''])
   const [qChapterId, setQChapterId] = useState<string>('')
 
   const fmt = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+  const selectedSet = sets.find(s => s.id === selectedSetId) || null
 
   const fetchAll = useCallback(async () => {
     const { data: vData } = await supabase.from('briefing_videos').select('*').eq('company_id', companyId).order('created_at', { ascending: false })
@@ -557,36 +565,103 @@ function SurveysTab({ companyId }: { companyId: string }) {
 
   const fetchVideoData = useCallback(async () => {
     if (!selectedVideoId) return
-    const { data: qData } = await supabase.from('survey_questions').select('*').eq('video_id', selectedVideoId).order('trigger_sec')
-    setQuestions(qData || [])
-    const { data: rData } = await supabase.from('survey_responses').select('*, student:students(name, email)').eq('video_id', selectedVideoId)
-    setResponses(rData || [])
+    const { data: sData } = await supabase.from('survey_sets').select('*').eq('video_id', selectedVideoId).order('created_at', { ascending: false })
+    setSets(sData || [])
+    const active = (sData || []).find((s: SurveySet) => s.is_active)
+    setSelectedSetId(prev => {
+      if (prev && (sData || []).some((s: SurveySet) => s.id === prev)) return prev
+      return active?.id || (sData && sData[0]?.id) || null
+    })
     const { data: chData } = await supabase.from('video_chapters').select('*').eq('video_id', selectedVideoId).order('sort_order')
     setChapters(chData || [])
   }, [selectedVideoId])
   useEffect(() => { fetchVideoData() }, [fetchVideoData])
 
+  // セット選択時に設問・回答を取得
+  useEffect(() => {
+    if (!selectedSetId) { setQuestions([]); setResponses([]); return }
+    const fetch = async () => {
+      const { data: qData } = await supabase.from('survey_questions').select('*').eq('survey_set_id', selectedSetId).order('trigger_sec')
+      setQuestions(qData || [])
+      const { data: rData } = await supabase.from('survey_responses').select('*, student:students(name, email)').eq('survey_set_id', selectedSetId)
+      setResponses(rData || [])
+    }
+    fetch()
+  }, [selectedSetId])
+
+  // ─── セット CRUD ───
+  const createSet = async () => {
+    if (!newSetName || !selectedVideoId) return
+    // 新規セット作成
+    const { data: newSet, error } = await supabase.from('survey_sets').insert({
+      video_id: selectedVideoId, name: newSetName, is_active: false, company_id: companyId,
+    }).select().single()
+    if (error || !newSet) { toast.error('作成に失敗しました'); return }
+
+    // コピー元が指定されている場合、設問をコピー
+    if (copyFromSetId) {
+      const { data: srcQuestions } = await supabase.from('survey_questions').select('*').eq('survey_set_id', copyFromSetId)
+      if (srcQuestions && srcQuestions.length > 0) {
+        const copies = srcQuestions.map((q: any) => ({
+          video_id: q.video_id, trigger_sec: q.trigger_sec, question_text: q.question_text,
+          choices: q.choices, chapter_id: q.chapter_id, company_id: q.company_id,
+          survey_set_id: newSet.id,
+        }))
+        await supabase.from('survey_questions').insert(copies)
+      }
+    }
+
+    setNewSetName(''); setCopyFromSetId('')
+    toast.success(copyFromSetId ? 'コピーして作成しました' : '作成しました')
+    fetchVideoData()
+    setSelectedSetId(newSet.id)
+  }
+
+  const activateSet = async (setId: string) => {
+    if (!selectedVideoId) return
+    // 同じ動画の他セットを無効化
+    await supabase.from('survey_sets').update({ is_active: false }).eq('video_id', selectedVideoId)
+    await supabase.from('survey_sets').update({ is_active: true }).eq('id', setId)
+    toast.success('有効化しました')
+    fetchVideoData()
+  }
+
+  const deleteSet = async (setId: string) => {
+    const target = sets.find(s => s.id === setId)
+    if (!target) return
+    if (target.is_active) { toast.error('有効なセットは削除できません。先に別のセットを有効化してください。'); return }
+    if (!confirm(`「${target.name}」を削除しますか？設問と回答も全て削除されます。`)) return
+    await supabase.from('survey_sets').delete().eq('id', setId)
+    toast.success('削除しました')
+    if (selectedSetId === setId) setSelectedSetId(null)
+    fetchVideoData()
+  }
+
+  // ─── 設問 CRUD（選択中セットに追加） ───
   const addQuestion = async () => {
-    if (!qText || !selectedVideoId) return
+    if (!qText || !selectedSetId || !selectedVideoId) return
+    if (selectedSet?.is_active) { toast.error('有効なセットには設問を追加できません。コピーして新しいセットを作成してください。'); return }
     const validChoices = choices.filter((c) => c.trim())
     if (validChoices.length < 2) { toast.error('選択肢を2つ以上入力してください'); return }
     const inputSec = Number(triggerSec) || 0
     const linkedChapter = chapters.find(ch => ch.id === qChapterId)
-    // パート指定時: パート開始秒 + 入力秒 = 実際のtrigger_sec
     const actualTriggerSec = linkedChapter ? linkedChapter.start_sec + inputSec : inputSec
     const { error } = await supabase.from('survey_questions').insert({
       video_id: selectedVideoId, trigger_sec: actualTriggerSec, question_text: qText,
       choices: validChoices, company_id: companyId,
-      chapter_id: qChapterId || null,
+      chapter_id: qChapterId || null, survey_set_id: selectedSetId,
     })
     if (error) { toast.error('追加に失敗しました'); return }
     setQText(''); setChoices(['', '', '', '']); setTriggerSec(''); setQChapterId('')
     toast.success('設問を追加しました')
-    fetchVideoData()
+    // リフレッシュ
+    const { data: qData } = await supabase.from('survey_questions').select('*').eq('survey_set_id', selectedSetId).order('trigger_sec')
+    setQuestions(qData || [])
   }
 
   const deleteQuestion = async (id: string) => {
-    if (!confirm('この設問と回答を削除しますか？')) return
+    if (selectedSet?.is_active) { toast.error('有効なセットの設問は削除できません。'); return }
+    if (!confirm('この設問を削除しますか？')) return
     await supabase.from('survey_questions').delete().eq('id', id)
     toast.success('削除しました')
     setQuestions((prev) => prev.filter((q) => q.id !== id))
@@ -594,8 +669,11 @@ function SurveysTab({ companyId }: { companyId: string }) {
 
   if (loading) return <p className="text-gray-400 text-center py-8">読み込み中...</p>
 
+  const isEditable = selectedSet && !selectedSet.is_active
+
   return (
     <div className="space-y-6">
+      {/* 動画選択 */}
       <div className="flex gap-2 flex-wrap">
         {videos.map((v) => (
           <button key={v.id} onClick={() => setSelectedVideoId(v.id)}
@@ -607,112 +685,194 @@ function SurveysTab({ companyId }: { companyId: string }) {
 
       {selectedVideoId && (
         <>
+          {/* ─── セット作成 ─── */}
           <div className="bg-white rounded-xl border p-6 space-y-4">
-            <h3 className="font-bold text-gray-800">アンケート設問を追加</h3>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div>
-                <label className="text-xs text-gray-500">パート</label>
-                <select value={qChapterId} onChange={e => setQChapterId(e.target.value)}
+            <h3 className="font-bold text-gray-800">アンケートを作成</h3>
+            <div className="flex gap-2 items-end flex-wrap">
+              <div className="flex-1 min-w-[200px]">
+                <label className="text-xs text-gray-500">アンケート名</label>
+                <input placeholder="例: 説明会アンケート v2" value={newSetName} onChange={e => setNewSetName(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1B2A4A]" />
+              </div>
+              <div className="w-48">
+                <label className="text-xs text-gray-500">作成方法</label>
+                <select value={copyFromSetId} onChange={e => setCopyFromSetId(e.target.value)}
                   className="w-full px-3 py-2 border rounded-lg text-sm bg-white">
-                  <option value="">指定なし（最初から見る）</option>
-                  {chapters.map(ch => (
-                    <option key={ch.id} value={ch.id}>{ch.label}</option>
+                  <option value="">新規作成</option>
+                  {sets.map(s => (
+                    <option key={s.id} value={s.id}>{s.name} からコピー</option>
                   ))}
                 </select>
               </div>
-              <div>
-                <label className="text-xs text-gray-500">{qChapterId ? 'パート開始から何秒後' : '動画開始から何秒後'}</label>
-                <input type="number" value={triggerSec} onChange={(e) => setTriggerSec(e.target.value)}
-                  placeholder="60" className="w-full px-3 py-2 border rounded-lg text-sm" min={0} />
-              </div>
-              <div className="md:col-span-2">
-                <label className="text-xs text-gray-500">質問文</label>
-                <input placeholder="例: この説明で最も興味を持ったポイントは？" value={qText} onChange={(e) => setQText(e.target.value)}
-                  className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1B2A4A]" />
-              </div>
+              <button onClick={createSet} disabled={!newSetName}
+                className="px-4 py-2 bg-[#1B2A4A] text-white rounded-lg text-sm font-medium hover:bg-[#0F1D35] disabled:opacity-40 shrink-0">
+                作成
+              </button>
             </div>
-            <div>
-              <label className="text-xs text-gray-500 mb-1 block">選択肢（2〜4つ）</label>
-              <div className="grid grid-cols-2 gap-2">
-                {choices.map((c, i) => (
-                  <input key={i} placeholder={`選択肢${i + 1}`} value={c}
-                    onChange={(e) => setChoices((prev) => prev.map((p, j) => j === i ? e.target.value : p))}
-                    className="px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1B2A4A]" />
+          </div>
+
+          {/* ─── セット一覧 ─── */}
+          {sets.length > 0 && (
+            <div className="bg-white rounded-xl border p-6 space-y-3">
+              <h3 className="font-bold text-gray-800">アンケート一覧</h3>
+              <div className="space-y-2">
+                {sets.map(s => (
+                  <div key={s.id}
+                    onClick={() => setSelectedSetId(s.id)}
+                    className={`flex items-center justify-between px-4 py-3 rounded-lg cursor-pointer transition-colors ${selectedSetId === s.id ? 'bg-[#1B2A4A]/5 border border-[#1B2A4A]/20' : 'bg-gray-50 hover:bg-gray-100'}`}>
+                    <div className="flex items-center gap-3">
+                      <span className="font-medium text-sm">{s.name}</span>
+                      {s.is_active ? (
+                        <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">有効</span>
+                      ) : (
+                        <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">下書き</span>
+                      )}
+                      <span className="text-xs text-gray-400">{new Date(s.created_at).toLocaleDateString('ja-JP')}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {!s.is_active && (
+                        <button onClick={(e) => { e.stopPropagation(); activateSet(s.id) }}
+                          className="text-xs px-3 py-1 bg-green-600 text-white rounded-full hover:bg-green-700">
+                          有効化
+                        </button>
+                      )}
+                      {!s.is_active && (
+                        <button onClick={(e) => { e.stopPropagation(); deleteSet(s.id) }}
+                          className="text-red-400 hover:text-red-600">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 ))}
               </div>
             </div>
-            <button onClick={addQuestion} disabled={!qText}
-              className="px-4 py-2 bg-[#1B2A4A] text-white rounded-lg text-sm font-medium hover:bg-[#0F1D35] disabled:opacity-40 flex items-center gap-2">
-              <Plus className="h-4 w-4" /> 追加
-            </button>
-          </div>
+          )}
 
-          {questions.length === 0 ? (
-            <div className="text-center py-8 text-gray-400">
-              <ClipboardList className="h-10 w-10 mx-auto mb-2 opacity-40" />
-              <p>この動画にはまだ設問がありません</p>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {questions.map((q) => {
-                const qResponses = responses.filter((r) => r.question_id === q.id)
-                const choiceCounts: Record<string, number> = {}
-                ;(q.choices as string[]).forEach((c) => (choiceCounts[c] = 0))
-                qResponses.forEach((r) => (choiceCounts[r.selected_choice] = (choiceCounts[r.selected_choice] || 0) + 1))
-                const total = qResponses.length
-                const linkedChapter = chapters.find(ch => ch.id === q.chapter_id)
-                const relativeSec = linkedChapter ? Math.max(0, q.trigger_sec - linkedChapter.start_sec) : q.trigger_sec
+          {/* ─── 選択中セットの設問 ─── */}
+          {selectedSet && (
+            <>
+              <div className="flex items-center gap-3">
+                <h3 className="font-bold text-gray-800">{selectedSet.name} の設問</h3>
+                {selectedSet.is_active && (
+                  <span className="text-xs text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">有効セットは変更不可（コピーして新規作成してください）</span>
+                )}
+              </div>
 
-                return (
-                  <div key={q.id} className="bg-white rounded-xl border p-5 space-y-3">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          {linkedChapter ? (
-                            <>
-                              <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">
-                                {linkedChapter.label}
-                              </span>
-                              <span className="text-xs bg-[#1B2A4A]/10 text-[#1B2A4A] px-2 py-0.5 rounded-full font-medium">
-                                開始から {fmt(relativeSec)} 後
-                              </span>
-                            </>
-                          ) : (
-                            <>
-                              <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">
-                                最初から見る
-                              </span>
-                              <span className="text-xs bg-[#1B2A4A]/10 text-[#1B2A4A] px-2 py-0.5 rounded-full font-medium">
-                                {fmt(q.trigger_sec)} 後に表示
-                              </span>
-                            </>
+              {/* 設問追加（下書きセットのみ） */}
+              {isEditable && (
+                <div className="bg-white rounded-xl border p-6 space-y-4">
+                  <h3 className="font-bold text-gray-800 text-sm">設問を追加</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div>
+                      <label className="text-xs text-gray-500">パート</label>
+                      <select value={qChapterId} onChange={e => setQChapterId(e.target.value)}
+                        className="w-full px-3 py-2 border rounded-lg text-sm bg-white">
+                        <option value="">指定なし（最初から見る）</option>
+                        {chapters.map(ch => (
+                          <option key={ch.id} value={ch.id}>{ch.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-500">{qChapterId ? 'パート開始から何秒後' : '動画開始から何秒後'}</label>
+                      <input type="number" value={triggerSec} onChange={(e) => setTriggerSec(e.target.value)}
+                        placeholder="60" className="w-full px-3 py-2 border rounded-lg text-sm" min={0} />
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="text-xs text-gray-500">質問文</label>
+                      <input placeholder="例: この説明で最も興味を持ったポイントは？" value={qText} onChange={(e) => setQText(e.target.value)}
+                        className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1B2A4A]" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-500 mb-1 block">選択肢（2〜4つ）</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {choices.map((c, i) => (
+                        <input key={i} placeholder={`選択肢${i + 1}`} value={c}
+                          onChange={(e) => setChoices((prev) => prev.map((p, j) => j === i ? e.target.value : p))}
+                          className="px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1B2A4A]" />
+                      ))}
+                    </div>
+                  </div>
+                  <button onClick={addQuestion} disabled={!qText}
+                    className="px-4 py-2 bg-[#1B2A4A] text-white rounded-lg text-sm font-medium hover:bg-[#0F1D35] disabled:opacity-40 flex items-center gap-2">
+                    <Plus className="h-4 w-4" /> 追加
+                  </button>
+                </div>
+              )}
+
+              {/* 設問一覧 */}
+              {questions.length === 0 ? (
+                <div className="text-center py-8 text-gray-400">
+                  <ClipboardList className="h-10 w-10 mx-auto mb-2 opacity-40" />
+                  <p>このセットにはまだ設問がありません</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {questions.map((q) => {
+                    const qResponses = responses.filter((r) => r.question_id === q.id)
+                    const choiceCounts: Record<string, number> = {}
+                    ;(q.choices as string[]).forEach((c) => (choiceCounts[c] = 0))
+                    qResponses.forEach((r) => (choiceCounts[r.selected_choice] = (choiceCounts[r.selected_choice] || 0) + 1))
+                    const total = qResponses.length
+                    const linkedChapter = chapters.find(ch => ch.id === q.chapter_id)
+                    const relativeSec = linkedChapter ? Math.max(0, q.trigger_sec - linkedChapter.start_sec) : q.trigger_sec
+
+                    return (
+                      <div key={q.id} className="bg-white rounded-xl border p-5 space-y-3">
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {linkedChapter ? (
+                                <>
+                                  <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">
+                                    {linkedChapter.label}
+                                  </span>
+                                  <span className="text-xs bg-[#1B2A4A]/10 text-[#1B2A4A] px-2 py-0.5 rounded-full font-medium">
+                                    開始から {fmt(relativeSec)} 後
+                                  </span>
+                                </>
+                              ) : (
+                                <>
+                                  <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">
+                                    最初から見る
+                                  </span>
+                                  <span className="text-xs bg-[#1B2A4A]/10 text-[#1B2A4A] px-2 py-0.5 rounded-full font-medium">
+                                    {fmt(q.trigger_sec)} 後に表示
+                                  </span>
+                                </>
+                              )}
+                            </div>
+                            <p className="font-bold text-gray-800 mt-2">{q.question_text}</p>
+                          </div>
+                          {isEditable && (
+                            <button onClick={() => deleteQuestion(q.id)} className="text-red-400 hover:text-red-600 shrink-0">
+                              <Trash2 className="h-4 w-4" />
+                            </button>
                           )}
                         </div>
-                        <p className="font-bold text-gray-800 mt-2">{q.question_text}</p>
+                        <div className="space-y-2">
+                          {Object.entries(choiceCounts).map(([choice, count]) => {
+                            const pct = total > 0 ? (count / total) * 100 : 0
+                            return (
+                              <div key={choice} className="flex items-center gap-3">
+                                <span className="text-sm text-gray-700 w-40 truncate">{choice}</span>
+                                <div className="flex-1 h-6 bg-gray-100 rounded-full overflow-hidden">
+                                  <div className="h-full bg-[#1B2A4A]/70 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                                </div>
+                                <span className="text-xs text-gray-500 w-16 text-right">{count}票 ({pct.toFixed(0)}%)</span>
+                              </div>
+                            )
+                          })}
+                        </div>
+                        <p className="text-xs text-gray-400">回答数: {total}件</p>
                       </div>
-                      <button onClick={() => deleteQuestion(q.id)} className="text-red-400 hover:text-red-600 shrink-0">
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                    <div className="space-y-2">
-                      {Object.entries(choiceCounts).map(([choice, count]) => {
-                        const pct = total > 0 ? (count / total) * 100 : 0
-                        return (
-                          <div key={choice} className="flex items-center gap-3">
-                            <span className="text-sm text-gray-700 w-40 truncate">{choice}</span>
-                            <div className="flex-1 h-6 bg-gray-100 rounded-full overflow-hidden">
-                              <div className="h-full bg-[#1B2A4A]/70 rounded-full transition-all" style={{ width: `${pct}%` }} />
-                            </div>
-                            <span className="text-xs text-gray-500 w-16 text-right">{count}票 ({pct.toFixed(0)}%)</span>
-                          </div>
-                        )
-                      })}
-                    </div>
-                    <p className="text-xs text-gray-400">回答数: {total}件</p>
-                  </div>
-                )
-              })}
-            </div>
+                    )
+                  })}
+                </div>
+              )}
+            </>
           )}
         </>
       )}

@@ -66,6 +66,15 @@ export interface WatchEvent {
   created_at: string
 }
 
+export interface SurveySet {
+  id: string
+  video_id: string
+  name: string
+  is_active: boolean
+  company_id: string
+  created_at: string
+}
+
 export interface SurveyQuestion {
   id: string
   video_id: string
@@ -73,6 +82,7 @@ export interface SurveyQuestion {
   question_text: string
   choices: string[]  // JSONB → string[]
   chapter_id: string | null
+  survey_set_id: string | null
   company_id: string
   created_at: string
 }
@@ -94,6 +104,7 @@ export interface SurveyResponse {
   video_id: string
   selected_choice: string
   session_id: string | null
+  survey_set_id: string | null
   company_id: string
   created_at: string
   question?: SurveyQuestion
