@@ -36,6 +36,8 @@ export interface Student {
   email: string
   token: string
   token_expires_at: string
+  graduation_year: number | null
+  deleted_at: string | null
   company_id: string
   created_at: string
 }
