@@ -5,7 +5,7 @@ import type { BriefingVideo, Student, SurveyQuestion, SurveyResponse, SurveySet,
 import { toast } from 'sonner'
 import {
   Video, Users, BarChart3, ClipboardList, LogOut, Plus, Trash2,
-  Copy, Link, Clock, CheckCircle2, XCircle, Play, Upload, Download, Loader2,
+  Copy, Clock, CheckCircle2, XCircle, Play, Upload, Download, Loader2,
   Monitor, Smartphone, Tablet, Layers, Menu, X, Image
 } from 'lucide-react'
 
