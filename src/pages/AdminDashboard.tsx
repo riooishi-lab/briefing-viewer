@@ -6,15 +6,77 @@ import { toast } from 'sonner'
 import {
   Video, Users, BarChart3, ClipboardList, LogOut, Plus, Trash2,
   Copy, Clock, CheckCircle2, XCircle, Play, Upload, Download, Loader2,
-  Monitor, Smartphone, Tablet, Layers, Menu, X, Image
+  Monitor, Smartphone, Tablet, Layers, Menu, X, Image,
+  LayoutDashboard, RefreshCw, RotateCcw, Mail, Replace
 } from 'lucide-react'
 
-type Tab = 'videos' | 'students' | 'chapters' | 'surveys' | 'logs'
+type Tab = 'overview' | 'videos' | 'students' | 'chapters' | 'surveys' | 'logs'
 
 // YouTube ID 抽出
 const extractYouTubeId = (url: string): string | null => {
   const m = url.match(/(?:youtube\.com\/(?:[^/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?/\s]{11})/i)
   return m ? m[1] : null
+}
+
+// ─── 概要ダッシュボード ───
+function OverviewTab({ companyId }: { companyId: string }) {
+  const [stats, setStats] = useState<{ students: number; watched: number; responded: number; devices: Record<string, number> } | null>(null)
+
+  useEffect(() => {
+    const fetch = async () => {
+      const [{ data: students }, { data: plays }, { data: responses }, { data: events }] = await Promise.all([
+        supabase.from('students').select('id').eq('company_id', companyId).is('deleted_at', null),
+        supabase.from('watch_events').select('student_id').eq('company_id', companyId).eq('event_type', 'play'),
+        supabase.from('survey_responses').select('student_id').eq('company_id', companyId),
+        supabase.from('watch_events').select('student_id, device_type').eq('company_id', companyId).eq('event_type', 'play'),
+      ])
+      const studentCount = students?.length || 0
+      const watchedSet = new Set((plays || []).map((e: any) => e.student_id))
+      const respondedSet = new Set((responses || []).map((r: any) => r.student_id))
+      const devices: Record<string, number> = {}
+      ;(events || []).forEach((e: any) => { const d = e.device_type || '不明'; devices[d] = (devices[d] || 0) + 1 })
+      setStats({ students: studentCount, watched: watchedSet.size, responded: respondedSet.size, devices })
+    }
+    fetch()
+  }, [companyId])
+
+  if (!stats) return <p className="text-gray-400 text-center py-8">読み込み中...</p>
+
+  const watchRate = stats.students > 0 ? Math.round((stats.watched / stats.students) * 100) : 0
+  const responseRate = stats.watched > 0 ? Math.round((stats.responded / stats.watched) * 100) : 0
+
+  const cards = [
+    { label: '登録学生数', value: `${stats.students}名`, sub: '' },
+    { label: '視聴率', value: `${watchRate}%`, sub: `${stats.watched}/${stats.students}名が視聴` },
+    { label: 'アンケート回答率', value: `${responseRate}%`, sub: `${stats.responded}/${stats.watched}名が回答` },
+  ]
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {cards.map((c, i) => (
+          <div key={i} className="bg-white rounded-xl border p-6">
+            <p className="text-xs text-gray-500">{c.label}</p>
+            <p className="text-3xl font-bold text-[#1B2A4A] mt-1">{c.value}</p>
+            {c.sub && <p className="text-xs text-gray-400 mt-1">{c.sub}</p>}
+          </div>
+        ))}
+      </div>
+      {/* 端末別 */}
+      <div className="bg-white rounded-xl border p-6">
+        <h3 className="text-sm font-semibold text-gray-700 mb-3">端末別セッション</h3>
+        <div className="flex gap-6">
+          {Object.entries(stats.devices).sort((a, b) => b[1] - a[1]).map(([device, count]) => (
+            <div key={device} className="text-center">
+              <p className="text-2xl font-bold text-[#1B2A4A]">{count}</p>
+              <p className="text-xs text-gray-500">{device}</p>
+            </div>
+          ))}
+          {Object.keys(stats.devices).length === 0 && <p className="text-gray-400 text-sm">データなし</p>}
+        </div>
+      </div>
+    </div>
+  )
 }
 
 // ─── 動画管理 ───
@@ -94,6 +156,18 @@ function VideosTab({ companyId }: { companyId: string }) {
     if (!confirm('この動画を削除しますか？関連するアンケート・視聴ログも全て削除されます。')) return
     await supabase.from('briefing_videos').delete().eq('id', id)
     toast.success('削除しました')
+    fetchVideos()
+  }
+
+  const replaceVideo = async (id: string, newUrl: string) => {
+    const ytId = extractYouTubeId(newUrl)
+    if (ytId) {
+      await supabase.from('briefing_videos').update({ youtube_url: newUrl, video_url: null, duration_sec: null }).eq('id', id)
+    } else {
+      toast.error('有効なYouTube URLを入力してください')
+      return
+    }
+    toast.success('動画を差し替えました')
     fetchVideos()
   }
 
@@ -181,6 +255,12 @@ function VideosTab({ companyId }: { companyId: string }) {
                   </p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
+                  <button onClick={() => {
+                    const newUrl = prompt('新しいYouTube URLを入力してください', v.youtube_url || '')
+                    if (newUrl) replaceVideo(v.id, newUrl)
+                  }} className="p-1.5 text-gray-400 hover:text-[#1B2A4A]" title="動画を差し替え">
+                    <Replace className="h-4 w-4" />
+                  </button>
                   <button onClick={() => togglePublish(v.id, v.is_published)}
                     className={`px-3 py-1.5 rounded-full text-xs font-medium ${v.is_published ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
                     {v.is_published ? '公開中' : '非公開'}
@@ -328,6 +408,57 @@ function StudentsTab({ companyId }: { companyId: string }) {
     toast.success('URLをコピーしました')
   }
 
+  // 一括延長
+  const extendAll = async () => {
+    const days = prompt('有効期限を何日延長しますか？', '90')
+    if (!days || isNaN(Number(days))) return
+    const targets = filtered.map(s => s.id)
+    if (targets.length === 0) return
+    const newExpiry = new Date(Date.now() + Number(days) * 86400000).toISOString()
+    await supabase.from('students').update({ token_expires_at: newExpiry }).in('id', targets)
+    toast.success(`${targets.length}名の有効期限を延長しました`)
+    fetchStudents()
+  }
+
+  // CSVエクスポート
+  const exportCsv = () => {
+    const header = '氏名,メールアドレス,卒業年度,視聴状況,有効期限'
+    const rows = filtered.map(s =>
+      `"${s.name}","${s.email}",${s.graduation_year || ''},${s.watched ? '視聴済み' : '未視聴'},${new Date(s.token_expires_at).toLocaleDateString('ja-JP')}`
+    )
+    const blob = new Blob(['\uFEFF' + header + '\n' + rows.join('\n')], { type: 'text/csv;charset=utf-8;' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `students_${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+  }
+
+  // 削除済み表示・復元
+  const [showDeleted, setShowDeleted] = useState(false)
+  const [deletedStudents, setDeletedStudents] = useState<Student[]>([])
+  const fetchDeleted = async () => {
+    const { data } = await supabase.from('students').select('*').eq('company_id', companyId).not('deleted_at', 'is', null).order('deleted_at', { ascending: false })
+    setDeletedStudents(data || [])
+  }
+  const toggleDeleted = () => {
+    if (!showDeleted) fetchDeleted()
+    setShowDeleted(!showDeleted)
+  }
+  const restoreStudent = async (id: string) => {
+    await supabase.from('students').update({ deleted_at: null }).eq('id', id)
+    toast.success('復元しました')
+    fetchDeleted()
+    fetchStudents()
+  }
+
+  // メール通知（URLをクリップボードにコピー → mailto リンク）
+  const sendMailTo = (s: StudentWithStatus) => {
+    const url = `${window.location.origin}/watch?token=${s.token}`
+    const subject = encodeURIComponent('説明会動画のご案内')
+    const body = encodeURIComponent(`${s.name} 様\n\n以下のURLから説明会動画をご視聴ください。\n\n${url}\n\n※ 有効期限: ${new Date(s.token_expires_at).toLocaleDateString('ja-JP')}`)
+    window.open(`mailto:${s.email}?subject=${subject}&body=${body}`)
+  }
+
   // 卒業年度の選択肢を生成
   const currentYear = new Date().getFullYear()
   const yearOptions = Array.from({ length: 6 }, (_, i) => currentYear + i)
@@ -381,18 +512,30 @@ function StudentsTab({ companyId }: { companyId: string }) {
         )}
       </div>
 
-      {/* フィルタ */}
-      {availableYears.length > 0 && (
-        <div className="flex items-center gap-3">
-          <span className="text-xs font-medium text-gray-500">卒業年度</span>
-          <select value={filterYear} onChange={e => setFilterYear(e.target.value)}
-            className="px-2 py-1 border rounded text-xs text-gray-700 bg-white">
-            <option value="">すべて</option>
-            {availableYears.sort().map(y => <option key={y} value={y}>{y}年卒</option>)}
-          </select>
-          <span className="text-xs text-gray-400">{filtered.length}名</span>
-        </div>
-      )}
+      {/* フィルタ・操作 */}
+      <div className="flex items-center gap-3 flex-wrap">
+        {availableYears.length > 0 && (
+          <>
+            <span className="text-xs font-medium text-gray-500">卒業年度</span>
+            <select value={filterYear} onChange={e => setFilterYear(e.target.value)}
+              className="px-2 py-1 border rounded text-xs text-gray-700 bg-white">
+              <option value="">すべて</option>
+              {availableYears.sort().map(y => <option key={y} value={y}>{y}年卒</option>)}
+            </select>
+          </>
+        )}
+        <span className="text-xs text-gray-400">{filtered.length}名</span>
+        <div className="flex-1" />
+        <button onClick={extendAll} className="text-xs text-gray-500 hover:text-[#1B2A4A] flex items-center gap-1">
+          <RefreshCw className="h-3 w-3" /> 期限一括延長
+        </button>
+        <button onClick={exportCsv} className="text-xs text-gray-500 hover:text-[#1B2A4A] flex items-center gap-1">
+          <Download className="h-3 w-3" /> CSV出力
+        </button>
+        <button onClick={toggleDeleted} className="text-xs text-gray-500 hover:text-[#1B2A4A] flex items-center gap-1">
+          <RotateCcw className="h-3 w-3" /> {showDeleted ? '削除済みを非表示' : '削除済みを表示'}
+        </button>
+      </div>
 
       {/* 一覧 */}
       {loading ? <p className="text-gray-400 text-center py-8">読み込み中...</p> : filtered.length === 0 ? (
@@ -439,7 +582,10 @@ function StudentsTab({ companyId }: { companyId: string }) {
                       <Copy className="h-3 w-3" /> コピー
                     </button>
                   </td>
-                  <td className="px-4 py-3 text-right">
+                  <td className="px-4 py-3 text-right flex items-center justify-end gap-1">
+                    <button onClick={() => sendMailTo(s)} className="text-gray-400 hover:text-[#1B2A4A]" title="メールで送信">
+                      <Mail className="h-4 w-4" />
+                    </button>
                     <button onClick={() => deleteStudent(s.id, s.name)} className="text-red-400 hover:text-red-600">
                       <Trash2 className="h-4 w-4" />
                     </button>
@@ -448,6 +594,31 @@ function StudentsTab({ companyId }: { companyId: string }) {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* 削除済み学生 */}
+      {showDeleted && (
+        <div className="bg-white rounded-xl border p-6 space-y-3">
+          <h3 className="font-bold text-gray-800 text-sm">削除済み学生</h3>
+          {deletedStudents.length === 0 ? (
+            <p className="text-gray-400 text-sm">削除済みの学生はいません</p>
+          ) : (
+            <div className="space-y-1">
+              {deletedStudents.map(s => (
+                <div key={s.id} className="flex items-center justify-between px-3 py-2 bg-gray-50 rounded-lg">
+                  <div>
+                    <span className="text-sm">{s.name}</span>
+                    <span className="text-xs text-gray-400 ml-2">{s.email}</span>
+                  </div>
+                  <button onClick={() => restoreStudent(s.id)}
+                    className="text-xs px-3 py-1 bg-[#1B2A4A] text-white rounded-full hover:bg-[#0F1D35]">
+                    復元
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -1487,6 +1658,19 @@ function LogsTab({ companyId }: { companyId: string }) {
     return `${m}:${String(s).padStart(2, '0')}`
   }
 
+  // ログCSVエクスポート
+  const exportLogsCsv = () => {
+    const header = '学生名,メール,視聴日時,視聴時間(秒),端末,アンケート,回答,完了'
+    const rows = logs.map(l =>
+      `"${l.student_name}","${l.student_email}","${new Date(l.played_at).toLocaleString('ja-JP')}",${l.watch_sec},"${l.device_type}","${l.survey_set_name}","${l.has_response ? '回答' : '未回答'}","${l.completed ? '完了' : '途中'}"`
+    )
+    const blob = new Blob(['\uFEFF' + header + '\n' + rows.join('\n')], { type: 'text/csv;charset=utf-8;' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `viewing_logs_${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+  }
+
   if (loading) return <p className="text-gray-400 text-center py-8">読み込み中...</p>
 
   const presets: Preset[] = ['今日', '今週', '今月', '全期間', 'カスタム']
@@ -1550,6 +1734,11 @@ function LogsTab({ companyId }: { companyId: string }) {
             </select>
           </>
         )}
+
+        <div className="flex-1" />
+        <button onClick={exportLogsCsv} className="text-xs text-gray-500 hover:text-[#1B2A4A] flex items-center gap-1 shrink-0">
+          <Download className="h-3 w-3" /> CSV出力
+        </button>
       </div>
 
       {/* 分析ビュー */}
@@ -1560,6 +1749,35 @@ function LogsTab({ companyId }: { companyId: string }) {
             <WatchDurationChart watchSecs={watchSecs} videoDuration={videoDuration} />
           </div>
           <HourlyChart hourlyCounts={hourlyCounts} />
+
+          {/* 離脱ポイント分析 */}
+          {videoDuration > 0 && (
+            <div className="bg-white rounded-xl border p-6">
+              <h3 className="text-sm font-semibold text-gray-700 mb-3">離脱ポイント分析</h3>
+              <p className="text-xs text-gray-400 mb-2">各セッションの最終再生位置の分布</p>
+              {(() => {
+                const BINS = 10
+                const binSize = videoDuration / BINS
+                const binCounts = Array(BINS).fill(0)
+                filtered.forEach(s => {
+                  if (s.last_position > 0) binCounts[Math.min(Math.floor(s.last_position / binSize), BINS - 1)]++
+                })
+                const maxC = Math.max(...binCounts, 1)
+                const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`
+                return (
+                  <div className="flex items-end gap-1 h-24">
+                    {binCounts.map((count, i) => (
+                      <div key={i} className="flex-1 flex flex-col items-center">
+                        <div className="w-full bg-red-400/70 rounded-t" style={{ height: `${(count / maxC) * 80}px` }} title={`${count}人`} />
+                        <span className="text-[9px] text-gray-400 mt-1">{fmt((i + 1) * binSize)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )
+              })()}
+              <p className="text-xs text-gray-400 mt-2">赤が高い=その時点で離脱した人が多い</p>
+            </div>
+          )}
         </div>
       )}
 
@@ -1656,10 +1874,10 @@ function LogsTab({ companyId }: { companyId: string }) {
 }
 
 // ─── メインダッシュボード ───
-const validTabs: Tab[] = ['videos', 'students', 'chapters', 'surveys', 'logs']
+const validTabs: Tab[] = ['overview', 'videos', 'students', 'chapters', 'surveys', 'logs']
 function getInitialTab(): Tab {
   const hash = window.location.hash.replace('#', '') as Tab
-  return validTabs.includes(hash) ? hash : 'videos'
+  return validTabs.includes(hash) ? hash : 'overview'
 }
 
 export function AdminDashboard() {
@@ -1674,6 +1892,7 @@ export function AdminDashboard() {
   const companyName = adminUser.company?.name || ''
 
   const tabs: { key: Tab; label: string; icon: React.ReactNode }[] = [
+    { key: 'overview', label: '概要', icon: <LayoutDashboard className="h-5 w-5" /> },
     { key: 'videos', label: '動画管理', icon: <Video className="h-5 w-5" /> },
     { key: 'students', label: '学生管理', icon: <Users className="h-5 w-5" /> },
     { key: 'chapters', label: 'パート設定', icon: <Layers className="h-5 w-5" /> },
@@ -1740,6 +1959,7 @@ export function AdminDashboard() {
       <main className="flex-1 md:ml-56 p-4 md:p-8">
         <div className="max-w-5xl mx-auto">
           <h2 className="text-xl font-bold text-gray-800 mb-6 hidden md:block">{tabs.find(t => t.key === tab)?.label}</h2>
+          {tab === 'overview' && <OverviewTab companyId={companyId} />}
           {tab === 'videos' && <VideosTab companyId={companyId} />}
           {tab === 'students' && <StudentsTab companyId={companyId} />}
           {tab === 'chapters' && <ChaptersTab companyId={companyId} />}
