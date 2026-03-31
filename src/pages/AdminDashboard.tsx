@@ -208,15 +208,16 @@ function StudentsTab({ companyId }: { companyId: string }) {
   const [loading, setLoading] = useState(true)
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
+  const [gradYear, setGradYear] = useState('')
   const [csvMode, setCsvMode] = useState(false)
+  const [filterYear, setFilterYear] = useState<string>('')
   const fileRef = useRef<HTMLInputElement>(null)
 
   const fetchStudents = useCallback(async () => {
     setLoading(true)
-    const { data } = await supabase.from('students').select('*').eq('company_id', companyId).order('created_at', { ascending: false })
+    const { data } = await supabase.from('students').select('*').eq('company_id', companyId).is('deleted_at', null).order('created_at', { ascending: false })
     const studentList = data || []
 
-    // 視聴有無: play イベントのみに絞る（1セッション1件、行数上限に達しにくい）
     const { data: playEvents, error } = await supabase
       .from('watch_events')
       .select('student_id')
@@ -231,7 +232,6 @@ function StudentsTab({ companyId }: { companyId: string }) {
 
   useEffect(() => { fetchStudents() }, [fetchStudents])
 
-  // 視聴イベント追加時に自動更新
   useEffect(() => {
     const channel = supabase.channel('students-watch-status')
       .on('postgres_changes', {
@@ -244,14 +244,15 @@ function StudentsTab({ companyId }: { companyId: string }) {
 
   const addStudent = async () => {
     if (!name || !email) return
-    const { error } = await supabase.from('students').insert({ name, email, company_id: companyId })
+    const row: any = { name, email, company_id: companyId }
+    if (gradYear) row.graduation_year = Number(gradYear)
+    const { error } = await supabase.from('students').insert(row)
     if (error) { toast.error(error.message.includes('unique') ? 'このメールアドレスは既に登録されています' : '追加に失敗しました'); return }
-    setName(''); setEmail('')
+    setName(''); setEmail(''); setGradYear('')
     toast.success('学生を追加しました')
     fetchStudents()
   }
 
-  // CSV インポート
   const handleCsvUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -262,13 +263,14 @@ function StudentsTab({ companyId }: { companyId: string }) {
     const headers = lines[0].split(',').map((h) => h.trim().replace(/^"|"$/g, ''))
     const nameIdx = headers.findIndex((h) => h === '名前' || h === 'name')
     const emailIdx = headers.findIndex((h) => h === 'メールアドレス' || h === 'email')
+    const yearIdx = headers.findIndex((h) => h === '卒業年度' || h === 'graduation_year')
     if (nameIdx === -1 || emailIdx === -1) {
       toast.error('ヘッダーに「名前」「メールアドレス」が必要です')
       return
     }
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-    const rows: { name: string; email: string; company_id: string }[] = []
+    const rows: any[] = []
     const errors: string[] = []
     const seen = new Set<string>()
 
@@ -280,14 +282,17 @@ function StudentsTab({ companyId }: { companyId: string }) {
       if (!emailRegex.test(em)) { errors.push(`行${i + 1}: メール形式不正 (${em})`); continue }
       if (seen.has(em)) { errors.push(`行${i + 1}: 重複 (${em})`); continue }
       seen.add(em)
-      rows.push({ name: n, email: em, company_id: companyId })
+      const row: any = { name: n, email: em, company_id: companyId }
+      if (yearIdx !== -1 && cols[yearIdx]?.trim()) row.graduation_year = Number(cols[yearIdx].trim())
+      rows.push(row)
     }
 
     if (errors.length > 0) {
-      toast.error(errors.slice(0, 3).join('\n') + (errors.length > 3 ? `\n...他${errors.length - 3}件` : ''))
+      toast.error(errors.slice(0, 5).join('\n') + (errors.length > 5 ? `\n...他${errors.length - 5}件` : ''))
       return
     }
     if (rows.length === 0) { toast.error('有効なデータがありません'); return }
+    if (rows.length > 300) { toast.error(`一度にインポートできるのは300名までです（${rows.length}名）`); return }
 
     const { error } = await supabase.from('students').upsert(rows, { onConflict: 'email' })
     if (error) { toast.error(`インポート失敗: ${error.message}`); return }
@@ -298,7 +303,7 @@ function StudentsTab({ companyId }: { companyId: string }) {
   }
 
   const downloadSample = () => {
-    const csv = '名前,メールアドレス\n田中太郎,tanaka@example.com\n佐藤花子,sato@example.com'
+    const csv = '名前,メールアドレス,卒業年度\n田中太郎,tanaka@example.com,2027\n佐藤花子,sato@example.com,2027'
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' })
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
@@ -307,16 +312,30 @@ function StudentsTab({ companyId }: { companyId: string }) {
   }
 
   const deleteStudent = async (id: string, sName: string) => {
-    if (!confirm(`${sName} のデータを完全に削除しますか？`)) return
-    await supabase.from('students').delete().eq('id', id)
+    if (!confirm(`${sName} を削除しますか？（視聴ログは残ります）`)) return
+    await supabase.from('students').update({ deleted_at: new Date().toISOString() }).eq('id', id)
     toast.success('削除しました')
     fetchStudents()
+  }
+
+  const updateGradYear = async (id: string, year: number | null) => {
+    await supabase.from('students').update({ graduation_year: year }).eq('id', id)
+    setStudents(prev => prev.map(s => s.id === id ? { ...s, graduation_year: year } : s))
   }
 
   const copyUrl = (token: string) => {
     navigator.clipboard.writeText(`${window.location.origin}/watch?token=${token}`)
     toast.success('URLをコピーしました')
   }
+
+  // 卒業年度の選択肢を生成
+  const currentYear = new Date().getFullYear()
+  const yearOptions = Array.from({ length: 6 }, (_, i) => currentYear + i)
+  const availableYears = [...new Set(students.map(s => s.graduation_year).filter(Boolean))] as number[]
+
+  const filtered = filterYear
+    ? students.filter(s => s.graduation_year === Number(filterYear))
+    : students
 
   return (
     <div className="space-y-6">
@@ -339,15 +358,20 @@ function StudentsTab({ companyId }: { companyId: string }) {
                 <Download className="h-3 w-3" /> サンプルCSV
               </button>
             </div>
-            <p className="text-xs text-gray-400">ヘッダー: 名前,メールアドレス（UTF-8）</p>
+            <p className="text-xs text-gray-400">ヘッダー: 名前,メールアドレス,卒業年度（UTF-8、最大300名）</p>
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <input placeholder="氏名 *" value={name} onChange={(e) => setName(e.target.value)}
                 className="px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1B2A4A]" />
               <input placeholder="メールアドレス *" value={email} onChange={(e) => setEmail(e.target.value)}
                 className="px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1B2A4A]" />
+              <select value={gradYear} onChange={e => setGradYear(e.target.value)}
+                className="px-3 py-2 border rounded-lg text-sm bg-white text-gray-700">
+                <option value="">卒業年度（任意）</option>
+                {yearOptions.map(y => <option key={y} value={y}>{y}年卒</option>)}
+              </select>
             </div>
             <button onClick={addStudent} disabled={!name || !email}
               className="px-4 py-2 bg-[#1B2A4A] text-white rounded-lg text-sm font-medium hover:bg-[#0F1D35] disabled:opacity-40 flex items-center gap-2">
@@ -357,11 +381,24 @@ function StudentsTab({ companyId }: { companyId: string }) {
         )}
       </div>
 
+      {/* フィルタ */}
+      {availableYears.length > 0 && (
+        <div className="flex items-center gap-3">
+          <span className="text-xs font-medium text-gray-500">卒業年度</span>
+          <select value={filterYear} onChange={e => setFilterYear(e.target.value)}
+            className="px-2 py-1 border rounded text-xs text-gray-700 bg-white">
+            <option value="">すべて</option>
+            {availableYears.sort().map(y => <option key={y} value={y}>{y}年卒</option>)}
+          </select>
+          <span className="text-xs text-gray-400">{filtered.length}名</span>
+        </div>
+      )}
+
       {/* 一覧 */}
-      {loading ? <p className="text-gray-400 text-center py-8">読み込み中...</p> : students.length === 0 ? (
+      {loading ? <p className="text-gray-400 text-center py-8">読み込み中...</p> : filtered.length === 0 ? (
         <div className="text-center py-12 text-gray-400">
           <Users className="h-10 w-10 mx-auto mb-2 opacity-40" />
-          <p>学生がまだ登録されていません</p>
+          <p>{filterYear ? '該当する学生がいません' : '学生がまだ登録されていません'}</p>
         </div>
       ) : (
         <div className="bg-white rounded-xl border overflow-hidden">
@@ -370,32 +407,36 @@ function StudentsTab({ companyId }: { companyId: string }) {
               <tr>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">氏名</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">メールアドレス</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">説明会視聴</th>
+                <th className="text-left px-4 py-3 font-medium text-gray-600">卒年</th>
+                <th className="text-left px-4 py-3 font-medium text-gray-600">視聴</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">有効期限</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">視聴URL</th>
+                <th className="text-left px-4 py-3 font-medium text-gray-600">URL</th>
                 <th className="text-right px-4 py-3 font-medium text-gray-600">操作</th>
               </tr>
             </thead>
             <tbody className="divide-y">
-              {students.map((s) => (
+              {filtered.map((s) => (
                 <tr key={s.id} className="hover:bg-gray-50">
                   <td className="px-4 py-3 font-medium">{s.name}</td>
                   <td className="px-4 py-3 text-gray-500">{s.email}</td>
                   <td className="px-4 py-3">
+                    <select value={s.graduation_year || ''} onChange={e => updateGradYear(s.id, e.target.value ? Number(e.target.value) : null)}
+                      className="px-1 py-0.5 border rounded text-xs bg-white text-gray-600 w-20">
+                      <option value="">—</option>
+                      {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
+                    </select>
+                  </td>
+                  <td className="px-4 py-3">
                     {s.watched ? (
-                      <span className="inline-flex items-center gap-1 text-xs font-medium text-green-700 bg-green-100 px-2 py-1 rounded-full">
-                        <CheckCircle2 className="h-3 w-3" /> 視聴済み
-                      </span>
+                      <span className="text-xs font-medium text-green-700 bg-green-100 px-2 py-0.5 rounded-full">済</span>
                     ) : (
-                      <span className="inline-flex items-center gap-1 text-xs font-medium text-gray-500 bg-gray-100 px-2 py-1 rounded-full">
-                        <XCircle className="h-3 w-3" /> 未視聴
-                      </span>
+                      <span className="text-xs font-medium text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">未</span>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-gray-500">{new Date(s.token_expires_at).toLocaleDateString('ja-JP')}</td>
+                  <td className="px-4 py-3 text-gray-500 text-xs">{new Date(s.token_expires_at).toLocaleDateString('ja-JP')}</td>
                   <td className="px-4 py-3">
                     <button onClick={() => copyUrl(s.token)} className="text-[#1B2A4A] hover:underline flex items-center gap-1 text-xs">
-                      <Link className="h-3 w-3" /><Copy className="h-3 w-3" /> コピー
+                      <Copy className="h-3 w-3" /> コピー
                     </button>
                   </td>
                   <td className="px-4 py-3 text-right">
@@ -1210,58 +1251,44 @@ function WatchDurationChart({ watchSecs, videoDuration }: { watchSecs: number[];
   )
 }
 
-// ─── アンケート回答モーダル ───
+// ─── アンケート回答モーダル（セット別表示） ───
 function SurveyResponseModal({ studentId, videoId, studentName, onClose }: {
   studentId: string; videoId: string; studentName: string; onClose: () => void
 }) {
-  const [responses, setResponses] = useState<{ question_text: string; selected_choice: string; trigger_sec: number }[]>([])
+  const [groups, setGroups] = useState<{ setName: string; items: { question_text: string; selected_choice: string; trigger_sec: number }[] }[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     const fetchData = async () => {
-      // まずjoinで取得を試みる
-      const { data, error } = await supabase
-        .from('survey_responses')
-        .select('selected_choice, question_id, question:survey_questions(question_text, trigger_sec)')
-        .eq('student_id', studentId)
-        .eq('video_id', videoId)
-
-      if (!error && data && data.length > 0) {
-        const rows = data.map((r: any) => ({
-          question_text: r.question?.question_text || '',
-          selected_choice: r.selected_choice,
-          trigger_sec: r.question?.trigger_sec ?? 0,
-        })).sort((a: any, b: any) => a.trigger_sec - b.trigger_sec)
-        setResponses(rows)
-        setLoading(false)
-        return
-      }
-
-      // joinが失敗した場合のフォールバック: 個別に取得
-      const { data: resData } = await supabase
-        .from('survey_responses')
-        .select('selected_choice, question_id')
-        .eq('student_id', studentId)
-        .eq('video_id', videoId)
+      const [{ data: resData }, { data: setsData }] = await Promise.all([
+        supabase.from('survey_responses')
+          .select('selected_choice, question_id, survey_set_id, question:survey_questions(question_text, trigger_sec)')
+          .eq('student_id', studentId).eq('video_id', videoId),
+        supabase.from('survey_sets').select('id, name').eq('video_id', videoId),
+      ])
 
       if (!resData || resData.length === 0) { setLoading(false); return }
 
-      const qIds = resData.map((r: any) => r.question_id)
-      const { data: qData } = await supabase
-        .from('survey_questions')
-        .select('id, question_text, trigger_sec')
-        .in('id', qIds)
+      const setNameMap: Record<string, string> = {}
+      ;(setsData || []).forEach((s: any) => { setNameMap[s.id] = s.name })
 
-      const qMap = new Map((qData || []).map((q: any) => [q.id, q]))
-      const rows = resData.map((r: any) => {
-        const q = qMap.get(r.question_id)
-        return {
-          question_text: q?.question_text || '',
+      // セット別にグループ化
+      const grouped: Record<string, { question_text: string; selected_choice: string; trigger_sec: number }[]> = {}
+      resData.forEach((r: any) => {
+        const setKey = r.survey_set_id || '_none'
+        if (!grouped[setKey]) grouped[setKey] = []
+        grouped[setKey].push({
+          question_text: r.question?.question_text || '',
           selected_choice: r.selected_choice,
-          trigger_sec: q?.trigger_sec ?? 0,
-        }
-      }).sort((a, b) => a.trigger_sec - b.trigger_sec)
-      setResponses(rows)
+          trigger_sec: r.question?.trigger_sec ?? 0,
+        })
+      })
+
+      const result = Object.entries(grouped).map(([setId, items]) => ({
+        setName: setId === '_none' ? '(セットなし)' : (setNameMap[setId] || '不明なセット'),
+        items: items.sort((a, b) => a.trigger_sec - b.trigger_sec),
+      }))
+      setGroups(result)
       setLoading(false)
     }
     fetchData()
@@ -1271,7 +1298,7 @@ function SurveyResponseModal({ studentId, videoId, studentName, onClose }: {
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md space-y-4 p-6" onClick={e => e.stopPropagation()}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[80vh] overflow-y-auto space-y-4 p-6" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between">
           <h3 className="font-semibold text-gray-800 text-sm">{studentName} のアンケート回答</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors">
@@ -1280,15 +1307,22 @@ function SurveyResponseModal({ studentId, videoId, studentName, onClose }: {
         </div>
         {loading ? (
           <p className="text-gray-400 text-sm text-center py-6">読み込み中...</p>
-        ) : responses.length === 0 ? (
+        ) : groups.length === 0 ? (
           <p className="text-gray-400 text-sm text-center py-6">回答はありません</p>
         ) : (
-          <div className="space-y-3">
-            {responses.map((r, i) => (
-              <div key={i} className="border rounded-xl p-4 space-y-1.5">
-                <div className="text-xs text-gray-400">{fmt(r.trigger_sec)} 時点</div>
-                <div className="text-sm font-medium text-gray-700">{r.question_text}</div>
-                <div className="text-sm font-semibold text-[#1B2A4A]">→ {r.selected_choice}</div>
+          <div className="space-y-5">
+            {groups.map((g, gi) => (
+              <div key={gi}>
+                <p className="text-xs font-medium text-[#1B2A4A] bg-[#1B2A4A]/5 px-3 py-1.5 rounded-lg mb-2">{g.setName}</p>
+                <div className="space-y-2">
+                  {g.items.map((r, i) => (
+                    <div key={i} className="border rounded-xl p-4 space-y-1.5">
+                      <div className="text-xs text-gray-400">{fmt(r.trigger_sec)} 時点</div>
+                      <div className="text-sm font-medium text-gray-700">{r.question_text}</div>
+                      <div className="text-sm font-semibold text-[#1B2A4A]">→ {r.selected_choice}</div>
+                    </div>
+                  ))}
+                </div>
               </div>
             ))}
           </div>
