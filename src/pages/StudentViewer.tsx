@@ -295,11 +295,10 @@ export function StudentViewer() {
         const sel = selectedChapterRef.current
         if (sel === undefined) continue // まだ選択画面
         if (sel === null) {
-          // 最初から見る
-          if (videoRef.current?.chapter_survey_mode === 'chapter_only') {
+          // 最初から見る（デフォルトはパート紐付け分のみ）
+          if (videoRef.current?.chapter_survey_mode !== 'all') {
             if (currentCh?.id !== q.chapter_id) continue
           }
-          // mode === 'all' → フィルタなし（全表示）
         } else {
           // 特定チャプター選択 → そのチャプターの設問のみ
           if (q.chapter_id !== sel.id) continue
@@ -427,7 +426,7 @@ export function StudentViewer() {
 
       // チャプター取得
       const { data: chData } = await supabase.from('video_chapters').select('*')
-        .eq('video_id', vd.id).order('sort_order', { ascending: true })
+        .eq('video_id', vd.id).order('start_sec', { ascending: true })
       const chList = chData || []
       setChapters(chList)
       // チャプターが無い / none / image の場合は選択画面をスキップ（imageは動画下にグリッド表示）

@@ -649,7 +649,7 @@ function ChaptersTab({ companyId }: { companyId: string }) {
 
   const fetchChapters = useCallback(async () => {
     if (!selectedVideoId) return
-    const { data } = await supabase.from('video_chapters').select('*').eq('video_id', selectedVideoId).order('sort_order')
+    const { data } = await supabase.from('video_chapters').select('*').eq('video_id', selectedVideoId).order('start_sec')
     setChapters(data || [])
   }, [selectedVideoId])
   useEffect(() => { fetchChapters() }, [fetchChapters])
@@ -681,12 +681,6 @@ function ChaptersTab({ companyId }: { companyId: string }) {
     toast.success('表示モードを変更しました')
   }
 
-  const updateSurveyMode = async (mode: 'all' | 'chapter_only') => {
-    if (!selectedVideoId) return
-    const { error } = await supabase.from('briefing_videos').update({ chapter_survey_mode: mode }).eq('id', selectedVideoId)
-    if (error) { toast.error('保存に失敗しました'); console.error(error.message); return }
-    setVideos(prev => prev.map(v => v.id === selectedVideoId ? { ...v, chapter_survey_mode: mode } : v))
-  }
 
   const uploadThumbnail = async (chapterId: string, file: File) => {
     setUploading(chapterId)
@@ -793,23 +787,6 @@ function ChaptersTab({ companyId }: { companyId: string }) {
                 </div>
               )}
 
-              {chapters.length > 0 && (
-                <div className="border-t pt-4">
-                  <label className="text-xs text-gray-500 block mb-2">「最初から見る」を選んだ時のアンケート表示</label>
-                  <div className="flex gap-4">
-                    <label className="flex items-center gap-2 text-sm cursor-pointer">
-                      <input type="radio" name="surveyMode" checked={selectedVideo?.chapter_survey_mode !== 'chapter_only'}
-                        onChange={() => updateSurveyMode('all')} className="accent-[#1B2A4A]" />
-                      すべて表示
-                    </label>
-                    <label className="flex items-center gap-2 text-sm cursor-pointer">
-                      <input type="radio" name="surveyMode" checked={selectedVideo?.chapter_survey_mode === 'chapter_only'}
-                        onChange={() => updateSurveyMode('chapter_only')} className="accent-[#1B2A4A]" />
-                      パート紐付け分のみ
-                    </label>
-                  </div>
-                </div>
-              )}
             </div>
           )}
         </>
@@ -859,7 +836,7 @@ function SurveysTab({ companyId }: { companyId: string }) {
       if (prev && (sData || []).some((s: SurveySet) => s.id === prev)) return prev
       return active?.id || (sData && sData[0]?.id) || null
     })
-    const { data: chData } = await supabase.from('video_chapters').select('*').eq('video_id', selectedVideoId).order('sort_order')
+    const { data: chData } = await supabase.from('video_chapters').select('*').eq('video_id', selectedVideoId).order('start_sec')
     setChapters(chData || [])
   }, [selectedVideoId])
   useEffect(() => { fetchVideoData() }, [fetchVideoData])
@@ -956,7 +933,15 @@ function SurveysTab({ companyId }: { companyId: string }) {
 
   if (loading) return <p className="text-gray-400 text-center py-8">読み込み中...</p>
 
+  const selectedVideo = videos.find(v => v.id === selectedVideoId) || null
   const isEditable = selectedSet && !selectedSet.is_active
+
+  const updateSurveyMode = async (mode: 'all' | 'chapter_only') => {
+    if (!selectedVideoId) return
+    const { error } = await supabase.from('briefing_videos').update({ chapter_survey_mode: mode }).eq('id', selectedVideoId)
+    if (error) { toast.error('保存に失敗しました'); console.error(error.message); return }
+    setVideos(prev => prev.map(v => v.id === selectedVideoId ? { ...v, chapter_survey_mode: mode } : v))
+  }
 
   return (
     <div className="space-y-6">
@@ -972,6 +957,21 @@ function SurveysTab({ companyId }: { companyId: string }) {
 
       {selectedVideoId && (
         <>
+          {/* ─── アンケート表示設定 ─── */}
+          {chapters.length > 0 && (
+            <div className="bg-white rounded-xl border p-4 flex items-center justify-between">
+              <div>
+                <span className="text-sm font-medium text-gray-700">全てのアンケートを表示</span>
+                <p className="text-xs text-gray-400 mt-0.5">OFFの場合、各パートに紐付いたアンケートのみ表示されます</p>
+              </div>
+              <button
+                onClick={() => updateSurveyMode(selectedVideo?.chapter_survey_mode === 'all' ? 'chapter_only' : 'all')}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${selectedVideo?.chapter_survey_mode === 'all' ? 'bg-[#1B2A4A]' : 'bg-gray-300'}`}>
+                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${selectedVideo?.chapter_survey_mode === 'all' ? 'translate-x-6' : 'translate-x-1'}`} />
+              </button>
+            </div>
+          )}
+
           {/* ─── セット作成 ─── */}
           <div className="bg-white rounded-xl border p-6 space-y-4">
             <h3 className="font-bold text-gray-800">アンケートを作成</h3>
