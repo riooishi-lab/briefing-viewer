@@ -7,10 +7,10 @@ import {
   Video, Users, BarChart3, ClipboardList, LogOut, Plus, Trash2,
   Copy, Clock, CheckCircle2, XCircle, Play, Upload, Download, Loader2,
   Monitor, Smartphone, Tablet, Layers, Menu, X, Image,
-  LayoutDashboard, RefreshCw, RotateCcw, Mail, Replace
+  LayoutDashboard, RefreshCw, RotateCcw, Mail, Replace, TrendingUp
 } from 'lucide-react'
 
-type Tab = 'overview' | 'videos' | 'students' | 'chapters' | 'surveys' | 'logs'
+type Tab = 'overview' | 'videos' | 'students' | 'chapters' | 'surveys' | 'logs' | 'analytics'
 
 // YouTube ID 抽出
 const extractYouTubeId = (url: string): string | null => {
@@ -1529,13 +1529,12 @@ function getPresetRange(preset: Preset): { from: string; to: string } {
   return { from: '', to: '' }
 }
 
-function LogsTab({ companyId }: { companyId: string }) {
+function LogsTab({ companyId, viewMode }: { companyId: string; viewMode: 'logs' | 'analytics' }) {
   const [allSessions, setAllSessions] = useState<SessionEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [preset, setPreset] = useState<Preset>('全期間')
   const [customFrom, setCustomFrom] = useState('')
   const [customTo, setCustomTo] = useState('')
-  const [view, setView] = useState<'logs' | 'analytics'>('logs')
   const [selectedLog, setSelectedLog] = useState<{ studentId: string; videoId: string; studentName: string } | null>(null)
   const [setNames, setSetNames] = useState<string[]>([])
   const [filterSetName, setFilterSetName] = useState<string>('')
@@ -1677,27 +1676,8 @@ function LogsTab({ companyId }: { companyId: string }) {
 
   return (
     <div className="space-y-6">
-      {/* ビュー切り替え＋期間フィルター */}
+      {/* 期間フィルター */}
       <div className="bg-white rounded-xl border p-4 flex flex-wrap items-center gap-4">
-        {/* ログ / 分析 切り替え */}
-        <div className="flex rounded-lg border overflow-hidden shrink-0">
-          <button
-            onClick={() => setView('logs')}
-            className={`px-4 py-1.5 text-xs font-medium transition-colors ${view === 'logs' ? 'bg-[#1B2A4A] text-white' : 'text-gray-600 hover:bg-gray-50'}`}
-          >
-            ログ
-          </button>
-          <button
-            onClick={() => setView('analytics')}
-            className={`px-4 py-1.5 text-xs font-medium transition-colors ${view === 'analytics' ? 'bg-[#1B2A4A] text-white' : 'text-gray-600 hover:bg-gray-50'}`}
-          >
-            分析
-          </button>
-        </div>
-
-        <div className="w-px h-5 bg-gray-200 shrink-0" />
-
-        {/* 期間フィルター */}
         <span className="text-xs font-medium text-gray-500 shrink-0">期間</span>
         <div className="flex gap-1.5 flex-wrap">
           {presets.map((p) => (
@@ -1736,13 +1716,15 @@ function LogsTab({ companyId }: { companyId: string }) {
         )}
 
         <div className="flex-1" />
-        <button onClick={exportLogsCsv} className="text-xs text-gray-500 hover:text-[#1B2A4A] flex items-center gap-1 shrink-0">
-          <Download className="h-3 w-3" /> CSV出力
-        </button>
+        {viewMode === 'logs' && (
+          <button onClick={exportLogsCsv} className="text-xs text-gray-500 hover:text-[#1B2A4A] flex items-center gap-1 shrink-0">
+            <Download className="h-3 w-3" /> CSV出力
+          </button>
+        )}
       </div>
 
       {/* 分析ビュー */}
-      {view === 'analytics' && (
+      {viewMode === 'analytics' && (
         <div className="space-y-5">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <DevicePieChart sessions={filtered} />
@@ -1782,7 +1764,7 @@ function LogsTab({ companyId }: { companyId: string }) {
       )}
 
       {/* ログビュー */}
-      {view === 'logs' && (
+      {viewMode === 'logs' && (
         logs.length === 0 ? (
           <div className="text-center py-12 text-gray-400">
             <Play className="h-10 w-10 mx-auto mb-2 opacity-40" />
@@ -1874,7 +1856,7 @@ function LogsTab({ companyId }: { companyId: string }) {
 }
 
 // ─── メインダッシュボード ───
-const validTabs: Tab[] = ['overview', 'videos', 'students', 'chapters', 'surveys', 'logs']
+const validTabs: Tab[] = ['overview', 'videos', 'students', 'chapters', 'surveys', 'logs', 'analytics']
 function getInitialTab(): Tab {
   const hash = window.location.hash.replace('#', '') as Tab
   return validTabs.includes(hash) ? hash : 'overview'
@@ -1898,6 +1880,7 @@ export function AdminDashboard() {
     { key: 'chapters', label: 'パート設定', icon: <Layers className="h-5 w-5" /> },
     { key: 'surveys', label: 'アンケート', icon: <ClipboardList className="h-5 w-5" /> },
     { key: 'logs', label: '視聴ログ', icon: <BarChart3 className="h-5 w-5" /> },
+    { key: 'analytics', label: 'アナリティクス', icon: <TrendingUp className="h-5 w-5" /> },
   ]
 
   const handleTabClick = (t: Tab) => { setTab(t); setSidebarOpen(false) }
@@ -1964,7 +1947,8 @@ export function AdminDashboard() {
           {tab === 'students' && <StudentsTab companyId={companyId} />}
           {tab === 'chapters' && <ChaptersTab companyId={companyId} />}
           {tab === 'surveys' && <SurveysTab companyId={companyId} />}
-          {tab === 'logs' && <LogsTab companyId={companyId} />}
+          {tab === 'logs' && <LogsTab companyId={companyId} viewMode="logs" />}
+          {tab === 'analytics' && <LogsTab companyId={companyId} viewMode="analytics" />}
         </div>
       </main>
     </div>
